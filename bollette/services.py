@@ -14,7 +14,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.conf import settings
 from django.utils import timezone
 
-from . import ha_client, meteo_client, pun_client
+from . import fiscalita, ha_client, meteo_client, pun_client
 from .models import BollettaElettrica, BollettaGas, HaSyncLog
 
 logger = logging.getLogger("bollette.services")
@@ -33,7 +33,8 @@ def _get_cfg():
     try:
         from .models import ConfigurazioneSistema
         return ConfigurazioneSistema.get_config()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Recupero ConfigurazioneSistema non riuscito: %s", exc, exc_info=True)
         return None
 
 
@@ -68,60 +69,112 @@ def _get_entity_gas_prezzo() -> str:
 # ===========================================================================
 def calcola_prezzo_marginale(bolletta: BollettaElettrica) -> Decimal:
     """
-    Ritorna il €/kWh marginale MEDIO del mese applicando lo scalino accisa:
-        costo = base * min(kwh, soglia) + (base + accisa) * max(0, kwh - soglia)
-        prezzo_medio = costo / kwh
+    Ritorna il costo variabile MEDIO €/kWh IVA inclusa dell'intera bolletta (ADR-006):
+        costo_totale = Σ_mese(base × k + accisa × kwh_tassabili(k))
+        prezzo_medio = costo_totale / Σk
+
+    Disaggrega i consumi sui singoli mesi solari compresi nel periodo tramite
+    `ripartisci_consumi_per_mese`. Per ciascun mese applica il modello fiscale a tre tratti
+    (franchigia 150 kWh/mese e soglia recupero 220 kWh/mese).
+    `base` e `accisa` mantengono la semantica IVA inclusa.
     """
-    kwh = int(bolletta.kwh_fatturati or 0)
+    kwh_tot = int(bolletta.kwh_fatturati or 0)
     base = Decimal(bolletta.prezzo_marginale_base or 0)
     accisa = Decimal(bolletta.accisa_marginale or 0)
-    soglia = int(bolletta.soglia_accisa_kwh or 0)
+    soglia_f = int(bolletta.soglia_accisa_kwh or getattr(settings, "FRANCHIGIA_ACCISA_KWH", 150))
+    soglia_t = int(getattr(settings, "SOGLIA_RECUPERO_ACCISA_KWH", 220))
 
-    if kwh <= 0:
+    if kwh_tot <= 0:
         return _q6(base)
 
-    sotto = min(kwh, soglia)
-    sopra = max(0, kwh - soglia)
-    costo = base * sotto + (base + accisa) * sopra
-    return _q6(costo / Decimal(kwh))
+    if not (bolletta.periodo_inizio and bolletta.periodo_fine):
+        tassabili = fiscalita.kwh_tassabili(kwh_tot, franchigia=soglia_f, soglia_recupero=soglia_t)
+        costo = base * Decimal(kwh_tot) + accisa * tassabili
+        return _q6(costo / Decimal(kwh_tot))
+
+    ripartizione = fiscalita.ripartisci_consumi_per_mese(
+        bolletta.periodo_inizio,
+        bolletta.periodo_fine,
+        kwh_tot,
+        consumi_mensili=bolletta.consumi_mensili,
+    )
+
+    costo_totale = Decimal("0")
+    kwh_sommati = Decimal("0")
+    for _, _, k_mese, _ in ripartizione:
+        if k_mese <= 0:
+            continue
+        tassabili = fiscalita.kwh_tassabili(k_mese, franchigia=soglia_f, soglia_recupero=soglia_t)
+        costo_totale += base * k_mese + accisa * tassabili
+        kwh_sommati += k_mese
+
+    if kwh_sommati <= 0:
+        return _q6(base)
+
+    return _q6(costo_totale / kwh_sommati)
+
+
+def ricalcola_prezzi(bolletta: BollettaElettrica) -> BollettaElettrica:
+    """
+    Ricalcola prezzo marginale e stato dello scalino accisa (funzione pura, nessuna chiamata di rete).
+    """
+    soglia = int(bolletta.soglia_accisa_kwh or getattr(settings, "FRANCHIGIA_ACCISA_KWH", 150))
+    bolletta.sopra_soglia_accisa = int(bolletta.kwh_fatturati or 0) > soglia
+    bolletta.prezzo_marginale_medio = calcola_prezzo_marginale(bolletta)
+    return bolletta
+
+
+def arricchisci_con_dati_esterni(bolletta: BollettaElettrica) -> BollettaElettrica:
+    """
+    Arricchisce la bolletta con metriche da servizi terzi (Open-Meteo per Gradi Giorno e PUN per benchmark).
+    I/O isolato con timeout e gestione degli errori tramite logging senza interrompere il flusso.
+    """
+    if not (bolletta.periodo_inizio and bolletta.periodo_fine):
+        return bolletta
+
+    # 1. Integrazione Open-Meteo: Gradi Giorno e Temperatura media
+    try:
+        meteo = meteo_client.calcola_gradi_giorno(bolletta.periodo_inizio, bolletta.periodo_fine)
+        if meteo:
+            bolletta.gradi_giorno = meteo.get("hdd")
+            bolletta.temperatura_media = meteo.get("t_media")
+            if meteo.get("hdd", 0) > 0 and int(bolletta.kwh_fatturati or 0) > 0:
+                kwh_norm = Decimal(bolletta.kwh_fatturati) / Decimal(str(meteo["hdd"]))
+                bolletta.kwh_per_gradi_giorno = kwh_norm.quantize(QUATTRO_DECIMALI, rounding=ROUND_HALF_UP)
+    except Exception as exc:
+        logger.warning("Errore recupero dati meteo Open-Meteo per bolletta %s: %s", bolletta.pk, exc, exc_info=True)
+
+    # 2. Benchmark PUN e calcolo Spread
+    try:
+        pun_medio = pun_client.get_pun_periodo(bolletta.periodo_inizio, bolletta.periodo_fine)
+        if pun_medio:
+            bolletta.pun_medio_periodo = pun_medio
+            bolletta.spread_pun = pun_client.calcola_spread(bolletta.prezzo_marginale_medio, pun_medio)
+    except Exception as exc:
+        logger.warning("Errore recupero benchmark PUN per bolletta %s: %s", bolletta.pk, exc, exc_info=True)
+
+    return bolletta
 
 
 def aggiorna_campi_calcolati(bolletta: BollettaElettrica, *, salva: bool = True) -> BollettaElettrica:
     """
     Ricalcola prezzo marginale, recupera dati meteo da Open-Meteo e benchmark PUN.
     """
-    soglia = int(bolletta.soglia_accisa_kwh or 0)
-    bolletta.sopra_soglia_accisa = int(bolletta.kwh_fatturati or 0) > soglia
-    bolletta.prezzo_marginale_medio = calcola_prezzo_marginale(bolletta)
-
-    # 1. Integrazione Open-Meteo: Gradi Giorno e Temperatura media
-    if bolletta.periodo_inizio and bolletta.periodo_fine:
-        meteo = meteo_client.calcola_gradi_giorno(bolletta.periodo_inizio, bolletta.periodo_fine)
-        if meteo:
-            bolletta.gradi_giorno = meteo["hdd"]
-            bolletta.temperatura_media = meteo["t_media"]
-            if meteo["hdd"] > 0 and int(bolletta.kwh_fatturati or 0) > 0:
-                kwh_norm = Decimal(bolletta.kwh_fatturati) / Decimal(str(meteo["hdd"]))
-                bolletta.kwh_per_gradi_giorno = kwh_norm.quantize(QUATTRO_DECIMALI, rounding=ROUND_HALF_UP)
-
-    # 2. Benchmark PUN e calcolo Spread
-    if bolletta.periodo_inizio and bolletta.periodo_fine:
-        pun_medio = pun_client.get_pun_periodo(bolletta.periodo_inizio, bolletta.periodo_fine)
-        if pun_medio:
-            bolletta.pun_medio_periodo = pun_medio
-            bolletta.spread_pun = pun_client.calcola_spread(bolletta.prezzo_marginale_medio, pun_medio)
-
+    ricalcola_prezzi(bolletta)
+    arricchisci_con_dati_esterni(bolletta)
     if salva:
         bolletta.save()
     return bolletta
 
 
 def _componenti_da_bolletta(b: BollettaElettrica) -> dict:
-    """Estrae i 3 componenti + singolo valore da una singola bolletta elettrica."""
+    """Estrae i 4 componenti + singolo valore da una singola bolletta elettrica."""
+    soglia_rec = int(getattr(settings, "SOGLIA_RECUPERO_ACCISA_KWH", 220))
     return {
         "prezzo_kwh_base": _q6(Decimal(b.prezzo_marginale_base or 0)),
         "accisa_marginale_kwh": _q6(Decimal(b.accisa_marginale or 0)),
         "soglia_accisa_kwh": int(b.soglia_accisa_kwh or 150),
+        "soglia_recupero_kwh": soglia_rec,
         "prezzo_energia_kwh": calcola_prezzo_marginale(b),
         "n_bollette": 1,
         "kwh_totali": int(b.kwh_fatturati or 0),
@@ -131,7 +184,7 @@ def _componenti_da_bolletta(b: BollettaElettrica) -> dict:
 def calcola_prezzo_ha(mode: str | None = None) -> dict | None:
     """Ritorna il dict dei valori luce da pubblicare in HA secondo PREZZO_HA_MODE."""
     mode = mode or _get_mode()
-
+    soglia_rec = int(getattr(settings, "SOGLIA_RECUPERO_ACCISA_KWH", 220))
 
     ultima = BollettaElettrica.objects.order_by("-periodo_fine").first()
     if ultima is None:
@@ -163,6 +216,7 @@ def calcola_prezzo_ha(mode: str | None = None) -> dict | None:
         "prezzo_kwh_base": _q6(base_pesata),
         "accisa_marginale_kwh": _q6(accisa_pesata),
         "soglia_accisa_kwh": int(ultima.soglia_accisa_kwh or 150),
+        "soglia_recupero_kwh": soglia_rec,
         "prezzo_energia_kwh": _q6(medio_pesato),
         "n_bollette": len(bollette),
         "kwh_totali": kwh_tot,
@@ -173,15 +227,44 @@ def _pubblica_componenti(componenti: dict, modalita: str, bolletta=None) -> dict
     cfg = _get_cfg()
     entity_prezzo_singolo = (cfg.ha_entity_prezzo_singolo if cfg else "") or ha_client.ENTITY_PREZZO_SINGOLO
 
-    # Calcolo quota fissa giornaliera (€/giorno)
-    quota_mensile = Decimal("10.00")
-    if bolletta and bolletta.quota_fissa_mensile:
-        quota_mensile = bolletta.quota_fissa_mensile
+    avvisi: list[str] = []
+    quota_die: float | None = None
+    iva = getattr(settings, "ALIQUOTA_IVA_LUCE", Decimal("0.10"))
+
+    # Calcolo quota fissa giornaliera (€/giorno) dal dato netto di periodo
+    qf_netta = None
+    giorni = None
+    if bolletta and bolletta.quota_fissa_netta_periodo:
+        qf_netta = bolletta.quota_fissa_netta_periodo
+        giorni = bolletta.giorni_periodo
     else:
         ultima = BollettaElettrica.objects.order_by("-periodo_fine").first()
-        if ultima and ultima.quota_fissa_mensile:
-            quota_mensile = ultima.quota_fissa_mensile
-    quota_die = round(float(quota_mensile) / 30.0, 3)
+        if ultima and ultima.quota_fissa_netta_periodo:
+            qf_netta = ultima.quota_fissa_netta_periodo
+            giorni = ultima.giorni_periodo
+
+    if qf_netta is not None and giorni and giorni > 0:
+        quota_die = float(fiscalita.quota_fissa_giornaliera(qf_netta, giorni, iva=iva))
+    else:
+        # Ripiego su quota_fissa_mensile solo con warning e avviso esplicito
+        q_mensile = None
+        if bolletta and bolletta.quota_fissa_mensile:
+            q_mensile = bolletta.quota_fissa_mensile
+        else:
+            ultima = BollettaElettrica.objects.order_by("-periodo_fine").first()
+            if ultima and ultima.quota_fissa_mensile:
+                q_mensile = ultima.quota_fissa_mensile
+
+        if q_mensile is not None and q_mensile > 0:
+            msg = "Quota fissa netta periodo non disponibile: calcolo quota giornaliera degradato su quota_fissa_mensile / 30."
+            logger.warning(msg)
+            avvisi.append(msg)
+            quota_die = round(float(q_mensile) / 30.0, 3)
+        else:
+            msg = "Quota fissa non disponibile: pubblicazione di input_number.quota_fissa_giornaliera saltata."
+            logger.warning(msg)
+            avvisi.append(msg)
+            quota_die = None
 
     scritture = [
         ha_client.set_input_number(
@@ -194,33 +277,45 @@ def _pubblica_componenti(componenti: dict, modalita: str, bolletta=None) -> dict
             ha_client.ENTITY_SOGLIA_ACCISA, componenti["soglia_accisa_kwh"],
             modalita=modalita, bolletta=bolletta),
         ha_client.set_input_number(
-            entity_prezzo_singolo, componenti["prezzo_energia_kwh"],
+            ha_client.ENTITY_SOGLIA_RECUPERO, componenti.get("soglia_recupero_kwh", 220),
             modalita=modalita, bolletta=bolletta),
         ha_client.set_input_number(
-            ha_client.ENTITY_QUOTA_FISSA, quota_die,
+            entity_prezzo_singolo, componenti["prezzo_energia_kwh"],
             modalita=modalita, bolletta=bolletta),
     ]
+
+    if quota_die is not None:
+        scritture.append(
+            ha_client.set_input_number(
+                ha_client.ENTITY_QUOTA_FISSA, quota_die,
+                modalita=modalita, bolletta=bolletta)
+        )
+
     ok = all(s.ok for s in scritture)
 
     # Aggiorna anche data tariffa e stato del portale in Home Assistant
     ha_client.set_input_datetime(ha_client.ENTITY_DATA_TARIFFA, timezone.localdate())
+    portal_attrs = {
+        "friendly_name": "Portale Bollette",
+        "icon": "mdi:file-document-check" if ok else "mdi:alert-circle",
+        "prezzo_energia_kwh": float(componenti["prezzo_energia_kwh"]),
+        "prezzo_kwh_base": float(componenti["prezzo_kwh_base"]),
+        "accisa_marginale_kwh": float(componenti["accisa_marginale_kwh"]),
+        "soglia_accisa_kwh": int(componenti.get("soglia_accisa_kwh", 150)),
+        "soglia_recupero_kwh": int(componenti.get("soglia_recupero_kwh", 220)),
+        "modalita_calcolo": modalita,
+        "ultima_sincronizzazione": timezone.now().strftime("%d/%m/%Y %H:%M"),
+        "bolletta_riferimento": str(bolletta) if bolletta else "Media archivio",
+    }
+    if quota_die is not None:
+        portal_attrs["quota_fissa_giornaliera"] = quota_die
     ha_client.set_portal_state(
         ha_client.ENTITY_PORTALE_STATO,
         "Sincronizzato" if ok else "Errore Sync",
-        {
-            "friendly_name": "Portale Bollette",
-            "icon": "mdi:file-document-check" if ok else "mdi:alert-circle",
-            "prezzo_energia_kwh": float(componenti["prezzo_energia_kwh"]),
-            "prezzo_kwh_base": float(componenti["prezzo_kwh_base"]),
-            "accisa_marginale_kwh": float(componenti["accisa_marginale_kwh"]),
-            "quota_fissa_giornaliera": quota_die,
-            "modalita_calcolo": modalita,
-            "ultima_sincronizzazione": timezone.now().strftime("%d/%m/%Y %H:%M"),
-            "bolletta_riferimento": str(bolletta) if bolletta else "Media archivio",
-        }
+        portal_attrs,
     )
 
-    if bolletta is not None:
+    if bolletta is not None and getattr(bolletta, "pk", None):
         bolletta.prezzo_pubblicato_ha = Decimal(str(componenti["prezzo_energia_kwh"]))
         bolletta.ha_sync_at = timezone.now()
         bolletta.ha_sync_ok = ok
@@ -231,6 +326,7 @@ def _pubblica_componenti(componenti: dict, modalita: str, bolletta=None) -> dict
         "modalita": modalita,
         "componenti": componenti,
         "quota_fissa_giornaliera": quota_die,
+        "avvisi": avvisi,
         "scritture": scritture,
     }
 
@@ -315,25 +411,45 @@ def calcola_prezzo_marginale_gas(bolletta: BollettaGas) -> Decimal:
     return _q6(materia + accisa)
 
 
-def aggiorna_campi_calcolati_gas(bolletta: BollettaGas, *, salva: bool = True) -> BollettaGas:
-    """Ricalcola il prezzo marginale del gas e arricchisce con meteo Open-Meteo e benchmark PSV."""
+def ricalcola_prezzi_gas(bolletta: BollettaGas) -> BollettaGas:
+    """Ricalcola il prezzo marginale del gas (funzione pura, nessuna chiamata di rete)."""
     bolletta.prezzo_marginale_medio_smc = calcola_prezzo_marginale_gas(bolletta)
+    return bolletta
 
-    if bolletta.periodo_inizio and bolletta.periodo_fine:
-        # Metriche meteo Open-Meteo
+
+def arricchisci_con_dati_esterni_gas(bolletta: BollettaGas) -> BollettaGas:
+    """Arricchisce la bolletta gas con meteo Open-Meteo e benchmark PSV."""
+    if not (bolletta.periodo_inizio and bolletta.periodo_fine):
+        return bolletta
+
+    # Metriche meteo Open-Meteo
+    try:
         meteo = meteo_client.calcola_gradi_giorno(bolletta.periodo_inizio, bolletta.periodo_fine)
         if meteo:
-            bolletta.gradi_giorno = meteo["hdd"]
-            bolletta.temperatura_media = meteo["t_media"]
+            bolletta.gradi_giorno = meteo.get("hdd")
+            bolletta.temperatura_media = meteo.get("t_media")
             smc = Decimal(str(bolletta.smc_fatturati or 0))
-            if meteo["hdd"] > 0 and smc > 0:
+            if meteo.get("hdd", 0) > 0 and smc > 0:
                 bolletta.smc_per_gradi_giorno = (smc / Decimal(str(meteo["hdd"]))).quantize(QUATTRO_DECIMALI, rounding=ROUND_HALF_UP)
+    except Exception as exc:
+        logger.warning("Errore recupero meteo per bolletta gas %s: %s", bolletta.pk, exc, exc_info=True)
 
-        # Benchmark PSV
+    # Benchmark PSV
+    try:
         psv_medio = pun_client.get_psv_periodo(bolletta.periodo_inizio, bolletta.periodo_fine)
         if psv_medio:
             bolletta.psv_medio_periodo = psv_medio
             bolletta.spread_psv = pun_client.calcola_spread(bolletta.prezzo_marginale_medio_smc, psv_medio)
+    except Exception as exc:
+        logger.warning("Errore benchmark PSV per bolletta gas %s: %s", bolletta.pk, exc, exc_info=True)
+
+    return bolletta
+
+
+def aggiorna_campi_calcolati_gas(bolletta: BollettaGas, *, salva: bool = True) -> BollettaGas:
+    """Ricalcola il prezzo marginale del gas e arricchisce con meteo Open-Meteo e benchmark PSV."""
+    ricalcola_prezzi_gas(bolletta)
+    arricchisci_con_dati_esterni_gas(bolletta)
 
     if salva:
         bolletta.save()
@@ -341,8 +457,8 @@ def aggiorna_campi_calcolati_gas(bolletta: BollettaGas, *, salva: bool = True) -
             from . import netatmo_service
             netatmo_service.sincronizza_bollette_gas_con_netatmo(bolletta.pk)
             bolletta.refresh_from_db()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Errore sincronizzazione Netatmo per bolletta gas %s: %s", bolletta.pk, exc, exc_info=True)
     return bolletta
 
 

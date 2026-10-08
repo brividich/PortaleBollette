@@ -38,6 +38,8 @@ ENTITY_ACCISA_MARGINALE = getattr(
     settings, "HA_ENTITY_ACCISA_MARGINALE", "input_number.accisa_marginale_kwh")
 ENTITY_SOGLIA_ACCISA = getattr(
     settings, "HA_ENTITY_SOGLIA_ACCISA", "input_number.soglia_accisa_kwh")
+ENTITY_SOGLIA_RECUPERO = getattr(
+    settings, "HA_ENTITY_SOGLIA_RECUPERO", "input_number.soglia_recupero_kwh")
 ENTITY_PREZZO_SINGOLO = getattr(
     settings, "HA_ENTITY_PREZZO_SINGOLO", "input_number.prezzo_energia_kwh")
 ENTITY_PREZZO_GAS = getattr(
@@ -195,14 +197,15 @@ def set_input_number(
                         ok = True
                 else:
                     ok = True
-            except Exception:
+            except Exception as exc:
+                logger.warning("Verifica esistenza entità '%s' non riuscita: %s", entity_id, exc, exc_info=True)
                 ok = True
         else:
             dettaglio = f"Scrittura '{entity_id}' su HA fallita (servizio non ha risposto)."
 
     HaSyncLog.objects.create(
-        bolletta=bolletta,
-        bolletta_gas=bolletta_gas,
+        bolletta=bolletta if (bolletta and bolletta.pk) else None,
+        bolletta_gas=bolletta_gas if (bolletta_gas and bolletta_gas.pk) else None,
         modalita=modalita,
         entity_id=entity_id,
         valore=Decimal(str(value)),
@@ -666,8 +669,8 @@ def get_device_breakdown(inizio=None, fine=None) -> dict:
     if resp_states:
         try:
             stati = {s.get("entity_id"): s for s in resp_states.json() if "entity_id" in s}
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Decodifica stati HA fallita: %s", exc, exc_info=True)
 
     # Tariffa marginale di riferimento per stimare il costo (€/kWh)
     tariffa_kwh = 0.20
@@ -676,8 +679,8 @@ def get_device_breakdown(inizio=None, fine=None) -> dict:
         ult_bolletta = BollettaElettrica.objects.order_by("-periodo_fine").first()
         if ult_bolletta and ult_bolletta.prezzo_marginale_medio:
             tariffa_kwh = float(ult_bolletta.prezzo_marginale_medio)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Recupero bolletta di riferimento per tariffa fallito: %s", exc, exc_info=True)
 
     # 2. Interrogazione statistiche long-term via WebSocket
     _, token, _, _ = _get_ha_config()
@@ -885,8 +888,8 @@ def sincronizza_termostato_netatmo_da_ha() -> dict:
     try:
         from . import netatmo_service
         netatmo_service.sincronizza_bollette_gas_con_netatmo()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Sincronizzazione gas Netatmo non riuscita: %s", exc, exc_info=True)
 
     return {
         "ok": True,

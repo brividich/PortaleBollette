@@ -1,0 +1,45 @@
+# ==============================================================================
+# Package / Template Sensor per Home Assistant: Prezzo Dinamico a Scaglioni
+# Calcola il prezzo marginale del PROSSIMO kWh consumato nel mese corrente.
+# ADR-006 / Modello Fiscale a Tre Tratti (Franchigia 150 kWh e Recupero 220 kWh)
+# ==============================================================================
+
+template:
+  - sensor:
+      - name: "Prezzo Prossimo kWh Elettrico"
+        unique_id: prezzo_prossimo_kwh_elettrico
+        unit_of_measurement: "€/kWh"
+        state_class: measurement
+        icon: mdi:flash-outline
+        state: >
+          {% set k = states('sensor.energia_mese_corrente') | float(0) %}
+          {% set base = states('input_number.prezzo_kwh_base') | float(0) %}
+          {% set accisa = states('input_number.accisa_marginale_kwh') | float(0) %}
+          {% set s_acc = states('input_number.soglia_accisa_kwh') | float(150) %}
+          {% set s_rec = states('input_number.soglia_recupero_kwh') | float(220) %}
+          {% set cond1 = 1 if k > s_acc else 0 %}
+          {% set cond2 = 1 if (k > s_rec and k < (s_rec + s_acc)) else 0 %}
+          {% set pendenza = cond1 + cond2 %}
+          {{ (base + accisa * pendenza) | round(4) }}
+        attributes:
+          pendenza_marginale: >
+            {% set k = states('sensor.energia_mese_corrente') | float(0) %}
+            {% set s_acc = states('input_number.soglia_accisa_kwh') | float(150) %}
+            {% set s_rec = states('input_number.soglia_recupero_kwh') | float(220) %}
+            {% set cond1 = 1 if k > s_acc else 0 %}
+            {% set cond2 = 1 if (k > s_rec and k < (s_rec + s_acc)) else 0 %}
+            {{ cond1 + cond2 }}
+          tratto_fiscale: >
+            {% set k = states('sensor.energia_mese_corrente') | float(0) %}
+            {% set s_acc = states('input_number.soglia_accisa_kwh') | float(150) %}
+            {% set s_rec = states('input_number.soglia_recupero_kwh') | float(220) %}
+            {% if k <= s_acc %}
+              Franchigia ordinaria (Accisa = 0)
+            {% elif k <= s_rec %}
+              Tassazione ordinaria (Pendenza = 1)
+            {% elif k < (s_rec + s_acc) %}
+              Recupero imposta erariale (Pendenza = 2)
+            {% else %}
+              Franchigia azzerata (Pendenza = 1)
+            {% endif %}
+          formula_applicata: "base + accisa * ((k > soglia_accisa) + (k > soglia_recupero and k < soglia_recupero + soglia_accisa))"

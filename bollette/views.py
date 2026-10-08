@@ -949,8 +949,8 @@ def ha_toggle_device_api(request):
         try:
             body = json.loads(request.body)
             entity_id = body.get("entity_id")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Decodifica JSON payload switch toggle fallita: %s", exc, exc_info=True)
 
     if not entity_id:
         return JsonResponse({"ok": False, "errore": "entity_id non specificato."})
@@ -974,8 +974,8 @@ def ha_climate_control_api(request):
             body = json.loads(request.body)
             entity_id = body.get("entity_id")
             temp_val = body.get("temperature")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Decodifica JSON payload climate control fallita: %s", exc, exc_info=True)
 
     if not entity_id or temp_val is None:
         return JsonResponse({"ok": False, "errore": "Parametri mancanti."})
