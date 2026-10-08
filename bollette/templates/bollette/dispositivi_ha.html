@@ -13,7 +13,7 @@
         </h1>
         {% if telemetria.online %}
           <span class="badge ok">
-            <span class="pulse-dot"></span> HA Online ({{ cfg.ha_base_url|default:"192.168.1.206:8123" }})
+            <span class="pulse-dot"></span> HA Online ({{ cfg.ha_base_url|default:"https://homeassistant.local:8123" }})
           </span>
         {% else %}
           <a href="{% url 'configurazioni' %}" class="badge warn" style="text-decoration:none">

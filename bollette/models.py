@@ -33,7 +33,7 @@ class ConfigurazioneSistema(models.Model):
     # --- Home Assistant ---
     ha_base_url = models.CharField(
         "URL Base Home Assistant", max_length=255, default="",
-        help_text="Es. https://192.168.1.206:8123 (senza slash finale)."
+        help_text="Es. https://homeassistant.local:8123 (senza slash finale)."
     )
     ha_token = models.TextField(
         "Long-Lived Access Token HA", blank=True, default="",

@@ -321,7 +321,9 @@ def configurazioni_view(request):
     else:
         form = ConfigurazioneSistemaForm(instance=cfg)
 
-    ha_configured = bool(cfg.ha_base_url and cfg.ha_token)
+    env_ha_token = getattr(settings, "HA_TOKEN", "").strip()
+    env_ha_url = getattr(settings, "HA_BASE_URL", "").strip().rstrip("/")
+    ha_configured = bool((env_ha_url or cfg.ha_base_url) and (env_ha_token or cfg.ha_token))
     netatmo_configured = bool(cfg.netatmo_client_id and cfg.netatmo_client_secret and cfg.netatmo_refresh_token)
     meteo_configured = bool(cfg.meteo_latitude and cfg.meteo_longitude)
     ha_logs = list(HaSyncLog.objects.all().order_by("-creato_il")[:10])
@@ -332,6 +334,7 @@ def configurazioni_view(request):
         "form": form,
         "cfg": cfg,
         "ha_configured": ha_configured,
+        "ha_from_env": bool(env_ha_token),
         "netatmo_configured": netatmo_configured,
         "meteo_configured": meteo_configured,
         "webhook_url": webhook_url,
@@ -347,8 +350,10 @@ def test_servizio_api(request):
     cfg = ConfigurazioneSistema.get_config()
 
     if servizio == "ha":
-        base_url = (request.GET.get("url") or cfg.ha_base_url or "").rstrip("/")
-        token = request.GET.get("token") or cfg.ha_token or ""
+        env_base_url = (getattr(settings, "HA_BASE_URL", "") or "").rstrip("/")
+        env_token = getattr(settings, "HA_TOKEN", "") or ""
+        base_url = (request.GET.get("url") or env_base_url or cfg.ha_base_url or "").rstrip("/")
+        token = request.GET.get("token") or env_token or cfg.ha_token or ""
         tls_param = request.GET.get("tls_verify")
         if tls_param is not None:
             verify = tls_param.lower() in ("1", "true", "yes", "on")

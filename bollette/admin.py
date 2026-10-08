@@ -3,6 +3,7 @@ from django.contrib import admin, messages
 from django.utils.html import format_html
 
 from . import services
+from .forms import ConfigurazioneSistemaForm
 from .models import BollettaElettrica, BollettaGas, ConfigurazioneSistema, HaSyncLog, NetatmoRecordGiornaliero
 
 # Personalizzazione intestazioni Admin
@@ -13,6 +14,7 @@ admin.site.index_title = "Gestione Bollette, Bridge Home Assistant & Configurazi
 
 @admin.register(ConfigurazioneSistema)
 class ConfigurazioneSistemaAdmin(admin.ModelAdmin):
+    form = ConfigurazioneSistemaForm
     list_display = ("__str__", "ha_base_url", "prezzo_ha_mode", "ha_sync_auto", "meteo_citta", "aggiornato_il")
     fieldsets = (
         ("Bridge Home Assistant (REST API & Token)", {

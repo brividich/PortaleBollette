@@ -63,21 +63,28 @@ class RisultatoScrittura:
 
 
 def _get_ha_config():
-    """Recupera la configurazione HA da database (ConfigurazioneSistema) con fallback a settings."""
+    """Recupera la configurazione HA con priorità alle variabili d'ambiente (settings), con fallback a ConfigurazioneSistema (DB)."""
+    env_base_url = (getattr(settings, "HA_BASE_URL", "") or "").rstrip("/")
+    env_token = getattr(settings, "HA_TOKEN", "") or ""
+    env_verify = getattr(settings, "HA_TLS_VERIFY", True)
+    env_ca_bundle = getattr(settings, "HA_CA_BUNDLE", None)
+
     try:
         from .models import ConfigurazioneSistema
         cfg = ConfigurazioneSistema.get_config()
-        base_url = (cfg.ha_base_url or getattr(settings, "HA_BASE_URL", "")).rstrip("/")
-        token = cfg.ha_token or getattr(settings, "HA_TOKEN", "")
-        verify = cfg.ha_tls_verify if cfg.ha_base_url else getattr(settings, "HA_TLS_VERIFY", True)
-        ca_bundle = cfg.ha_ca_bundle or getattr(settings, "HA_CA_BUNDLE", None)
+        # L'env ha priorità sul database per URL e Token (sicurezza ADR-002)
+        base_url = env_base_url or (cfg.ha_base_url or "").rstrip("/")
+        token = env_token or cfg.ha_token
+        verify = env_verify if env_base_url else (cfg.ha_tls_verify if cfg.ha_base_url else env_verify)
+        ca_bundle = env_ca_bundle or cfg.ha_ca_bundle
         return base_url, token, verify, ca_bundle
     except Exception:
+        logger.warning("Impossibile caricare ConfigurazioneSistema dal database, uso settings.", exc_info=True)
         return (
-            getattr(settings, "HA_BASE_URL", "").rstrip("/"),
-            getattr(settings, "HA_TOKEN", ""),
-            getattr(settings, "HA_TLS_VERIFY", True),
-            getattr(settings, "HA_CA_BUNDLE", None)
+            env_base_url,
+            env_token,
+            env_verify,
+            env_ca_bundle,
         )
 
 

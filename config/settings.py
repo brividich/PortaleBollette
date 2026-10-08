@@ -42,6 +42,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "bollette.middleware.PortaleRequireLoginMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -120,4 +121,10 @@ SOGLIA_RECUPERO_ACCISA_KWH = int(os.environ.get("SOGLIA_RECUPERO_ACCISA_KWH", "2
 ALIQUOTA_ACCISA_ORDINARIA = Decimal(os.environ.get("ALIQUOTA_ACCISA_ORDINARIA", "0.0227"))
 ALIQUOTA_IVA_LUCE = Decimal(os.environ.get("ALIQUOTA_IVA_LUCE", "0.10"))
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:latest")
+
+# ---------------------------------------------------------------------------
+# Sicurezza e Autenticazione Opzionale
+# ---------------------------------------------------------------------------
+PORTALE_REQUIRE_LOGIN = _env_bool("PORTALE_REQUIRE_LOGIN", False)
+LOGIN_URL = "/admin/login/"
 

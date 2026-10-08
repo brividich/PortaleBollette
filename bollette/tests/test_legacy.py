@@ -8,9 +8,14 @@ from bollette import ha_client
 
 class HomeAssistantDispositiviTests(TestCase):
     def setUp(self):
+        from unittest.mock import patch
+        self.mock_req_patcher = patch("bollette.ha_client._request", return_value=None)
+        self.mock_req_patcher.start()
+        self.addCleanup(self.mock_req_patcher.stop)
+
         self.client = Client()
         self.cfg = ConfigurazioneSistema.get_config()
-        self.cfg.ha_base_url = "http://192.168.1.206:8123"
+        self.cfg.ha_base_url = "https://homeassistant.local:8123"
         self.cfg.ha_token = "dummy_test_token"
         self.cfg.save()
 

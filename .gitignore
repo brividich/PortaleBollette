@@ -11,6 +11,7 @@ scratch_*.json
 # File media e PDF caricati (dati personali)
 media/
 bollette_pdf/
+*.pdf
 
 # Python
 __pycache__/

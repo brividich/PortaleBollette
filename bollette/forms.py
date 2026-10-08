@@ -136,9 +136,9 @@ class ConfigurazioneSistemaForm(forms.ModelForm):
             "netatmo_client_id", "netatmo_client_secret", "netatmo_refresh_token",
         ]
         widgets = {
-            "ha_token": forms.PasswordInput(render_value=True, attrs={
+            "ha_token": forms.PasswordInput(render_value=False, attrs={
                 "id": "id_ha_token",
-                "placeholder": "Incolla il Long-Lived Access Token (es. eyJhbGciOiJIUzI1NiIs...)",
+                "placeholder": "Incolla il Long-Lived Access Token (lascia vuoto per mantenere quello esistente)",
                 "autocomplete": "off",
                 "style": "font-family: var(--font-mono); font-size: .86rem;",
             }),
@@ -202,17 +202,35 @@ class ConfigurazioneSistemaForm(forms.ModelForm):
                 "placeholder": "Client ID da dev.netatmo.com/apps",
                 "style": "font-family: var(--font-mono);",
             }),
-            "netatmo_client_secret": forms.PasswordInput(render_value=True, attrs={
+            "netatmo_client_secret": forms.PasswordInput(render_value=False, attrs={
                 "id": "id_netatmo_client_secret",
                 "placeholder": "Client Secret da dev.netatmo.com/apps",
                 "style": "font-family: var(--font-mono);",
             }),
-            "netatmo_refresh_token": forms.PasswordInput(render_value=True, attrs={
+            "netatmo_refresh_token": forms.PasswordInput(render_value=False, attrs={
                 "id": "id_netatmo_refresh_token",
                 "placeholder": "Refresh Token generato su dev.netatmo.com",
                 "style": "font-family: var(--font-mono); font-size: .86rem;",
             }),
         }
+
+    def clean_ha_token(self):
+        token = (self.cleaned_data.get("ha_token") or "").strip()
+        if not token and self.instance and self.instance.pk:
+            return self.instance.ha_token
+        return token
+
+    def clean_netatmo_client_secret(self):
+        secret = (self.cleaned_data.get("netatmo_client_secret") or "").strip()
+        if not secret and self.instance and self.instance.pk:
+            return self.instance.netatmo_client_secret
+        return secret
+
+    def clean_netatmo_refresh_token(self):
+        token = (self.cleaned_data.get("netatmo_refresh_token") or "").strip()
+        if not token and self.instance and self.instance.pk:
+            return self.instance.netatmo_refresh_token
+        return token
 
 
 class UploadNetatmoForm(forms.Form):

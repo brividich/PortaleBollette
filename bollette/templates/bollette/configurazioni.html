@@ -58,7 +58,7 @@
         </div>
         <div class="meta-row">
           <span class="meta-label">Token REST:</span>
-          <span class="meta-val">{% if cfg.ha_token %}•••••••• (Attivo){% else %}<strong style="color:var(--warn)">Mancante</strong>{% endif %}</span>
+          <span class="meta-val">{% if ha_from_env %}•••••••• (Attivo da Env){% elif cfg.ha_token %}•••••••• (Attivo nel DB){% else %}<strong style="color:var(--warn)">Mancante</strong>{% endif %}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Strategia Prezzo:</span>
@@ -347,7 +347,7 @@
               </button>
             </div>
             <small class="help">
-              Generato dal tuo profilo utente in Home Assistant. Memorizzato in sicurezza nel database SQLite protetto.
+              {% if ha_from_env %}<strong style="color:var(--accent-teal)">Nota:</strong> Token impostato tramite variabile d'ambiente <code>HA_TOKEN</code> (prioritaria). {% endif %}Generato dal profilo utente in Home Assistant. Il valore resta mascherato e non viene esposto nel markup.
             </small>
           </div>
 

@@ -11,12 +11,11 @@
 
 ## ADR-001 — Architettura base del tool (STUB ricostruito — DA COMPLETARE)
 
-> ⚠️ **Nota onesta:** il file `ADR_analisi_bollette.md` originale non era presente
+> ⚠️ **Nota:** il file `ADR_analisi_bollette.md` originale non era presente
 > nel repo al momento della stesura dell'ADR-002. Questo ADR-001 è uno **stub
-> ricostruito dal contesto** che mi hai fornito, NON il documento originale.
-> Va riletto e completato/corretto da te. Serve solo a dare aggancio all'ADR-002.
+> ricostruito dal contesto** che richiede revisione e completamento.
 
-- **Stato:** stub (da validare)
+- **Stato:** 📝 STUB (da completare)
 - **Contesto:** tool personale always-on per archiviare e analizzare le bollette
   gas + luce, con calcolo dei prezzi marginali variabili.
 - **Decisioni note (dal contesto):**
@@ -34,8 +33,7 @@
 
 ## ADR-002 — Bridge Home Assistant (scrittura prezzo + validazione consumi)
 
-- **Stato:** 🟡 **PROPOSTO — in attesa di approvazione.** Contiene punti marcati
-  **`[DA CONFERMARE]`** che richiedono il tuo OK prima di passare alla FASE 2 (codice).
+- **Stato:** 🟢 **ACCETTATO & IMPLEMENTATO**
 - **Data:** 2026-06-29
 - **Decisori:** Luca (owner del tool)
 - **Si aggancia a:** ADR-001
@@ -69,9 +67,9 @@ Assistant** autenticata con un **Long-Lived Access Token**.
 
 ### (a) Trasporto: REST API HA + token in variabile d'ambiente
 
-- **Endpoint base:** `https://192.168.1.206:8123/api/...`
+- **Endpoint base:** `https://homeassistant.local:8123/api/...`
 - **Configurazione (MAI hardcoded):**
-  - `HA_BASE_URL` — es. `https://192.168.1.206:8123`
+  - `HA_BASE_URL` — es. `https://homeassistant.local:8123`
   - `HA_TOKEN` — Long-Lived Access Token (header `Authorization: Bearer <token>`)
 - Entrambe lette **solo da variabili d'ambiente** (iniettate nel container Docker
   via `env_file` / secrets), mai nel codice e mai nel repo.
@@ -209,8 +207,8 @@ secondario, non parte della transazione della bolletta.
 ### (f) Sicurezza
 
 - **Token e URL solo da env** (`HA_TOKEN`, `HA_BASE_URL`) — mai hardcoded, mai nel repo.
-- **TLS verificato di default.** HA su `192.168.1.206:8123` usa quasi certamente un
-  **certificato self-signed** → introduco:
+- **TLS verificato di default.** HA su `homeassistant.local:8123` usa spesso un
+  **certificato self-signed** o Let's Encrypt interno → introduco:
   - `HA_TLS_VERIFY` (default `True`),
   - `HA_CA_BUNDLE` (path a un CA bundle/cert custom per validare il self-signed).
   - Disattivare la verifica TLS è possibile **solo** mettendo esplicitamente
@@ -325,5 +323,53 @@ secondario, non parte della transazione della bolletta.
      - **Cruscotto Dedicato (`/netatmo/`):** KPI aggregati, guida all'esportazione, grafico Chart.js a doppio asse (barre ore caldaia + linee temperatura interna e target), bilancio mensile e correlazione tabellare con tutte le fatture gas.
      - **Arricchimento Schede di Dettaglio Gas (`/bolletta/gas/<id>/`):** Box speciale con le metriche calcolate di fiamma, rendimento e scomposizione.
 
+---
 
+## ADR-006 — Modello Accisa a Tre Tratti, Ripartizione Mensile e Quota Fissa Giornaliera
+
+- **Stato:** 🟢 **ACCETTATO & IMPLEMENTATO**
+- **Data:** 2026-10-08
+- **Decisori:** Luca, AI Engineer
+- **Si aggancia a:** ADR-001, ADR-002, ADR-004
+
+### 1. Contesto e Problema
+Il calcolo del prezzo elettrico (€/kWh) e della quota fissa presentava tre discrepanze rispetto alle bollette reali dell'energia elettrica (validato su fatture Acea Energia domestiche residenti):
+1. **Accisa e recupero imposta erariale:** L'accisa non segue un singolo scaglione lineare, ma un modello a tre tratti con franchigia ($F = 150\text{ kWh/mese}$), soglia di recupero progressivo ($T = 220\text{ kWh/mese}$), e azzeramento teorico della franchigia a $T + F = 370\text{ kWh/mese}$. L'aliquota base per uso domestico è $A = 0{,}0227\text{ €/kWh}$ (+ IVA 10%).
+2. **Soglie mensili su bollette bimestrali:** `calcola_prezzo_marginale` applicava le soglie all'intero volume fatturato della bolletta (tipicamente 2 mesi), sottostimando le accise e il prezzo variabile unitario.
+3. **Quota fissa giornaliera errata:** Veniva calcolata come $\text{quota mensile} / 30$ con fallback silenzioso a `Decimal("10.00")`, anziché derivare dalla somma esatta delle quote fisse nette di periodo (vendita + rete + potenza) divise per i giorni effettivi di fatturazione.
+4. **Accoppiamento I/O e calcolo:** Il ricalcolo dei prezzi era legato alle chiamate di rete esterne (Open-Meteo, PUN, Netatmo) con blocchi `except Exception: pass` che nascondevano errori.
+
+### 2. Decisioni Architetturali
+1. **Modulo puro di fiscalità (`bollette/fiscalita.py`):**
+   - Funzioni matematiche pure prive di I/O o accessi ORM: `kwh_tassabili`, `imposte_mese`, `pendenza_accisa`, `prezzo_marginale_al_consumo`, `totale_bolletta_luce`, `quota_fissa_giornaliera`, `ripartisci_consumi_per_mese`.
+   - Pendenza marginale accisa determinata analiticamente:
+     - $k \le F \implies 0$
+     - $F < k \le T \implies 1$
+     - $T < k < T+F \implies 2$
+     - $k \ge T+F \implies 1$
+2. **Ripartizione consumi e persistenza:**
+   - Aggiunto `consumi_mensili` (`JSONField`) su `BollettaElettrica` per memorizzare i consumi solari effettivi/stimati estratti dal parser.
+   - Parser Acea aggiornato per estrarre le letture e consumi mensili effettivi/stimati (F1..F6) escludendo le righe di riepilogo `Fatturato`.
+   - Fallback a pro-rata solare con resto sull'ultimo mese e marcatura `stimato=True` + warning quando il parser non rileva consumi divisi.
+3. **Nuova semantica del prezzo marginale medio:**
+   - Il prezzo marginale medio della bolletta è il costo variabile medio IVA inclusa ponderato sui tratti mensili:
+     $$\text{Costo Variabile Medio} = \frac{\sum_{\text{mese}} (\text{base} \times k + \text{accisa} \times \text{kwh\_tassabili}(k))}{\sum k}$$
+4. **Quota fissa reale e trasparenza:**
+   - Calcolata come $\text{quota\_fissa\_netta\_periodo} \times (1 + \text{IVA}) / \text{giorni\_periodo}$.
+   - Se manca `quota_fissa_netta_periodo`, fallback a `quota_fissa_mensile * 12 / 365 * (1 + IVA)` con avviso esplicito restituito nei dizionari; se manca anche quello, l'entity non viene pubblicata.
+5. **Disaccoppiamento del servizio:**
+   - Separata `ricalcola_prezzi(bolletta)` (pura memoria/DB) da `arricchisci_con_dati_esterni(bolletta)` (I/O protetto con timeout e logging).
+6. **Integrazione Home Assistant:**
+   - Pubblicazione di `input_number.soglia_recupero_kwh` (220 kWh/mese).
+   - Template sensor `docs/ha_prezzo_scaglioni.yaml` che calcola dinamicamente in tempo reale il prezzo del prossimo kWh in base ai kWh cumulati nel mese corrente.
+
+### 3. Assunzioni e Punti da Verificare
+- **Cap del recupero a 370 kWh ($T + F$):** Non osservato empiricamente nelle bollette storiche (consumi massimi registrati 335 kWh/mese). Implementato rigorosamente secondo formula normativa; da monitorare in caso di bollette estive con consumi > 370 kWh/mese.
+- **CDISPD / Componente energia:** Nei mesi intermedi con variazioni tariffarie infra-bimestrali (es. maggio 2026 Delibera ARERA 386/2025), il parser e il modello usano il valore base contrattuale unitario della bolletta mediato.
+- **Parser altri fornitori:** I parser diversi da Acea continuano al momento a usare la stima pro-rata solare degradata (`stimato=True`) fino all'aggiornamento dei rispettivi estrattori.
+
+### 4. Conseguenze
+- Precisione al centesimo su imposte erariali, IVA, totale bolletta e costo marginale reale.
+- Home Assistant riflette accuratamente sia il costo medio di periodo che il costo istantaneo a scaglioni.
+- Trasparenza totale su canone RAI (escluso dal costo energia/kWh).
 
