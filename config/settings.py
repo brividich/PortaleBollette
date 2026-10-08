@@ -111,5 +111,13 @@ METEO_LONGITUDE = float(os.environ.get("METEO_LONGITUDE", "12.4964"))
 # Pipeline Ingest PDF & Ollama LLM (ADR-001)
 # ---------------------------------------------------------------------------
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+# ---------------------------------------------------------------------------
+# Modello Fiscale Elettrico (Accisa a tre tratti e IVA)
+# ---------------------------------------------------------------------------
+from decimal import Decimal
+FRANCHIGIA_ACCISA_KWH = int(os.environ.get("FRANCHIGIA_ACCISA_KWH", "150"))
+SOGLIA_RECUPERO_ACCISA_KWH = int(os.environ.get("SOGLIA_RECUPERO_ACCISA_KWH", "220"))
+ALIQUOTA_ACCISA_ORDINARIA = Decimal(os.environ.get("ALIQUOTA_ACCISA_ORDINARIA", "0.0227"))
+ALIQUOTA_IVA_LUCE = Decimal(os.environ.get("ALIQUOTA_IVA_LUCE", "0.10"))
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:latest")
 

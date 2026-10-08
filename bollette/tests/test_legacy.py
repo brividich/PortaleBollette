@@ -298,4 +298,3 @@ class ParserRobustezzaTests(TestCase):
         self.assertIn("Octopus Energy", nomi)
         self.assertIn("A2A Energia", nomi)
         self.assertIn("Acea Energia", nomi)
-
