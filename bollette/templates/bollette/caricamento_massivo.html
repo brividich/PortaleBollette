@@ -1,0 +1,266 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Caricamento Massivo Bollette — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <div class="card-header" style="margin-bottom:24px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <h1 style="font-size:1.55rem;font-weight:800;margin:0;letter-spacing:-0.02em">📦 Caricamento Massivo (Batch Engine)</h1>
+        <span class="badge info">Multi-Fornitore</span>
+      </div>
+      <span style="color:var(--text-muted);font-size:.88rem">
+        Importa decine di bollette PDF contemporaneamente (Luce e Gas). Il parser riconoscerà il fornitore, estrarrà le metriche e scaricherà le temperature Open-Meteo.
+      </span>
+    </div>
+    <div style="display:flex;gap:10px">
+      <a href="{% url 'archivio' %}" class="btn ghost">📂 Vai all'Archivio</a>
+    </div>
+  </div>
+
+  <!-- Box Risultati Elaborazione (se presente POST) -->
+  {% if report %}
+    <div class="card" style="border-left:4px solid var(--accent);margin-bottom:26px">
+      <div class="card-header" style="margin-bottom:16px">
+        <div>
+          <h2><span>📊</span> Esito Elaborazione Batch: {{ report.totale_files }} File Processat{{ report.totale_files|pluralize:"o,i" }}</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Riepilogo delle operazioni contabili eseguite</span>
+        </div>
+        <span class="badge ok">✓ Batch Completato</span>
+      </div>
+
+      <!-- KPI Risultati -->
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 22px;">
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border-left:3px solid var(--ok);border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Nuove Archiviate</div>
+          <div style="font-size:1.6rem;font-weight:800;color:var(--ok);font-family:var(--font-display)">{{ report.tot_creati }}</div>
+          <div style="font-size:.74rem;color:var(--text-dim)">Salvate nel database</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border-left:3px solid var(--accent);border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Aggiornate</div>
+          <div style="font-size:1.6rem;font-weight:800;color:var(--accent);font-family:var(--font-display)">{{ report.tot_aggiornati }}</div>
+          <div style="font-size:.74rem;color:var(--text-dim)">Dati o PDF sovrascritti</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border-left:3px solid var(--warn);border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Già Presenti (Saltate)</div>
+          <div style="font-size:1.6rem;font-weight:800;color:var(--warn);font-family:var(--font-display)">{{ report.tot_saltati }}</div>
+          <div style="font-size:.74rem;color:var(--text-dim)">Duplicati protetti</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border-left:3px solid var(--err);border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Errori / Non Riconosciute</div>
+          <div style="font-size:1.6rem;font-weight:800;color:var(--err);font-family:var(--font-display)">{{ report.tot_errori }}</div>
+          <div style="font-size:.74rem;color:var(--text-dim)">PDF scansionati/illeggibili</div>
+        </div>
+      </div>
+
+      <!-- Tabella Dettagli Singoli File -->
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>File PDF</th>
+              <th>Stato</th>
+              <th>Tipo</th>
+              <th>Fornitore</th>
+              <th>Periodo</th>
+              <th>Consumo</th>
+              <th>Importo</th>
+              <th>Marginale</th>
+              <th>Azione</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in report.dettagli %}
+              <tr>
+                <td><code style="font-size:.8rem">{{ d.file }}</code></td>
+                <td>
+                  {% if d.stato == 'creato' %}
+                    <span class="badge ok">✓ Creata</span>
+                  {% elif d.stato == 'aggiornato' %}
+                    <span class="badge info">🔄 Aggiornata</span>
+                  {% elif d.stato == 'saltato' %}
+                    <span class="badge warn">⚠️ Esistente</span>
+                  {% else %}
+                    <span class="badge off">✕ Errore</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if d.tipo == 'gas' %}
+                    <span style="color:var(--gas);font-weight:700">🔥 Gas</span>
+                  {% elif d.tipo == 'luce' %}
+                    <span style="color:var(--electric);font-weight:700">⚡ Luce</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>{{ d.fornitore|default:"—" }}</td>
+                <td style="font-family:var(--font-mono);font-size:.82rem">{{ d.periodo|default:"—" }}</td>
+                <td><strong>{{ d.consumo|default:"—" }}</strong></td>
+                <td><strong class="price-tag">{{ d.importo|default:"—" }}</strong></td>
+                <td class="price-tag">{{ d.prezzo_marginale|default:"—" }}</td>
+                <td>
+                  {% if d.id %}
+                    {% if d.tipo == 'gas' %}
+                      <a href="{% url 'dettaglio_bolletta_gas' d.id %}" class="btn ghost btn-xs">Dettagli →</a>
+                    {% else %}
+                      <a href="{% url 'dettaglio_bolletta_luce' d.id %}" class="btn ghost btn-xs">Dettagli →</a>
+                    {% endif %}
+                  {% else %}
+                    <span style="color:var(--err);font-size:.78rem">{{ d.errore }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:10px">
+        <a href="{% url 'archivio' %}" class="btn">Vai all'Archivio Completo</a>
+        <a href="{% url 'caricamento_massivo' %}" class="btn ghost">Carica Altri File</a>
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Area Upload Batch Interattiva -->
+  <div class="card" style="border: 2px dashed rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.03); padding: 36px 28px; text-align: center; border-radius: var(--radius-lg)">
+    
+    <form method="post" enctype="multipart/form-data" id="bulkUploadForm">
+      {% csrf_token %}
+
+      <div style="max-width: 580px; margin: 0 auto 24px;">
+        <div style="font-size:3.2rem;margin-bottom:12px;filter:drop-shadow(0 0 12px rgba(56,189,248,0.35))">📁</div>
+        <h2 style="margin:0 0 8px;font-size:1.45rem;font-weight:700">Trascina qui i tuoi PDF o selezionali dal computer</h2>
+        <p style="color:var(--text-muted);font-size:.9rem;line-height:1.5;margin:0 0 20px">
+          Puoi caricare contemporaneamente tutte le bollette degli ultimi 1, 2 o 5 anni. Il parser riconoscerà automaticamente fornitore (Enel, SEN, Eni Plenitude, A2A, Acea, Octopus, Edison, Hera, Iren, ecc.) e tipologia (Luce o Gas).
+        </p>
+
+        <!-- Input File Multiplo Nascosto / Stilizzato -->
+        <label for="id_file_bollette" class="btn" style="cursor:pointer;padding:12px 28px;font-size:1rem;display:inline-flex;box-shadow:0 4px 16px rgba(56,189,248,0.25)">
+          ➕ Sfoglia e Seleziona File PDF
+        </label>
+        <input type="file" name="file_bollette" id="id_file_bollette" multiple accept=".pdf" style="display:none" onchange="gestisciFileSelezionati(this)">
+      </div>
+
+      <!-- Anteprima File Selezionati -->
+      <div id="anteprimaContainer" style="display:none;background:rgba(15,23,42,0.7);border:1px solid var(--card-border);border-radius:12px;padding:18px;margin:0 auto 22px;max-width:640px;text-align:left">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <strong style="color:#f8fafc;font-size:.92rem">
+            File selezionati (<span id="conteggioFile" style="color:var(--accent)">0</span>):
+          </strong>
+          <button type="button" class="btn ghost btn-xs" onclick="svuotaSelezione()">Rimuovi tutti</button>
+        </div>
+        <div id="listaFile" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;padding-right:6px"></div>
+      </div>
+
+      <!-- Opzioni di Importazione -->
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px;font-size:.88rem;color:var(--text)">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" name="sovrascrivi_esistenti" id="id_sovrascrivi_esistenti" value="true" style="width:auto">
+          <span style="color:var(--text-muted)">Sovrascrivi le bollette se già presenti per lo stesso intervallo (ricalcolo metriche)</span>
+        </label>
+      </div>
+
+      <!-- Pulsante Avvio Elaborazione -->
+      <div style="display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap">
+        <button type="submit" id="btnAvviaUpload" style="padding:12px 32px;font-size:1.02rem" disabled>
+          ⚡ Avvia Caricamento Massivo
+        </button>
+        <div id="loadingNotice" style="display:none;color:var(--accent);font-size:.88rem;align-items:center;gap:8px">
+          <span>⏳</span> Analisi in corso... Il motore sta elaborando i PDF e interrogando Open-Meteo...
+        </div>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Box Informativo & Istruzioni -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-top: 26px;">
+    
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header" style="margin-bottom:10px">
+        <h2><span>⚡</span> Pipeline di Elaborazione</h2>
+      </div>
+      <ol style="color:var(--text-muted);font-size:.84rem;line-height:1.75;padding-left:18px;margin:0">
+        <li><strong>Smistamento fornitore:</strong> individua se ogni bolletta è Luce o Gas e associa fornitore e codice POD/PDR.</li>
+        <li><strong>Estrazione contabile:</strong> rileva kWh, Smc, totale fattura e date esatte di inizio e fine periodo.</li>
+        <li><strong>Meteo & Indici storici:</strong> per ciascuna bolletta contatta Open-Meteo e scarica la temperatura media del periodo esatto, calcolando anche lo spread vs PUN/PSV.</li>
+        <li><strong>Protezione duplicati:</strong> se una bolletta per quel periodo è già archiviata, la ignora preservando l'integrità.</li>
+      </ol>
+    </div>
+
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header" style="margin-bottom:10px">
+        <h2><span>💻</span> Importazione da Cartella (CLI)</h2>
+      </div>
+      <p style="color:var(--text-muted);font-size:.84rem;margin:0 0 12px">
+        Se hai un archivio locale con decine o centinaia di bollette, puoi importarle con un singolo comando:
+      </p>
+      <pre style="background:rgba(15,23,42,0.9);padding:12px;border-radius:8px;font-size:.8rem;color:var(--accent);margin:0;overflow-x:auto;border:1px solid var(--card-border)"><code>python manage.py importa_cartella "C:\percorso\alle\bollette"</code></pre>
+      <div style="font-size:.76rem;color:var(--text-dim);margin-top:10px">
+        Scansiona ricorsivamente tutte le sottocartelle e importa tutti i documenti <code>.pdf</code>.
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function gestisciFileSelezionati(input) {
+      const container = document.getElementById('anteprimaContainer');
+      const lista = document.getElementById('listaFile');
+      const badgeConteggio = document.getElementById('conteggioFile');
+      const btnAvvia = document.getElementById('btnAvviaUpload');
+
+      lista.innerHTML = '';
+      const files = Array.from(input.files);
+
+      if (files.length === 0) {
+        container.style.display = 'none';
+        btnAvvia.disabled = true;
+        btnAvvia.textContent = '⚡ Avvia Caricamento Massivo';
+        return;
+      }
+
+      badgeConteggio.textContent = files.length;
+      btnAvvia.disabled = false;
+      btnAvvia.textContent = `⚡ Avvia Caricamento di ${files.length} Bollett${files.length === 1 ? 'a' : 'e'}`;
+      container.style.display = 'block';
+
+      files.forEach((file, index) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:8px;font-size:.82rem;border:1px solid rgba(255,255,255,0.04)';
+        
+        const sizeKb = (file.size / 1024).toFixed(1);
+        const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+        const displaySize = file.size > 1024 * 1024 ? `${sizeMb} MB` : `${sizeKb} KB`;
+
+        item.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
+            <span>📄</span>
+            <strong style="color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${file.name}</strong>
+            <span style="color:var(--text-muted);font-size:.75rem">(${displaySize})</span>
+          </div>
+          <span class="badge ok" style="font-size:.7rem;padding:1px 6px">Pronto</span>
+        `;
+        lista.appendChild(item);
+      });
+    }
+
+    function svuotaSelezione() {
+      const input = document.getElementById('id_file_bollette');
+      input.value = '';
+      gestisciFileSelezionati(input);
+    }
+
+    document.getElementById('bulkUploadForm').addEventListener('submit', function() {
+      const btn = document.getElementById('btnAvviaUpload');
+      const notice = document.getElementById('loadingNotice');
+      btn.disabled = true;
+      btn.textContent = '⏳ Elaborazione in corso...';
+      notice.style.display = 'inline-flex';
+    });
+  </script>
+
+{% endblock %}

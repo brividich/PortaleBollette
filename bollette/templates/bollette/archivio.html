@@ -1,0 +1,281 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Archivio Fatture — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <!-- Page Header -->
+  <div class="card-header" style="margin-bottom:24px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <h1 style="font-size:1.55rem;font-weight:800;margin:0;letter-spacing:-0.02em">🗄️ Archivio Bollette</h1>
+        <span class="badge info">Storico Digitale</span>
+      </div>
+      <span style="color:var(--text-muted);font-size:.88rem">
+        Tutte le fatture archiviate, consultabili con scomposizione marginale, scostamenti di borsa e PDF originali.
+      </span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <a href="{% url 'caricamento_massivo' %}" class="btn ghost">📦 Caricamento Massivo</a>
+      <a href="{% url 'esporta_csv' %}" class="btn ghost">📥 Esporta CSV</a>
+      <a href="{% url 'nuova_bolletta' %}" class="btn btn-electric">+ Bolletta Luce</a>
+      <a href="{% url 'nuova_bolletta_gas' %}" class="btn btn-gas">+ Bolletta Gas</a>
+    </div>
+  </div>
+
+  <!-- Barra Filtri e Ricerca Glassmorphism -->
+  <div class="card" style="padding:18px 22px;margin-bottom:26px">
+    <form method="get" action="{% url 'archivio' %}" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      
+      <!-- Segmented Control Tipo Fornitura -->
+      <div class="segmented-control">
+        <a href="?tipo=tutti&anno={{ anno_filtro }}&fornitore={{ fornitore_filtro }}&q={{ query }}" class="{% if tipo_filtro == 'tutti' %}active{% endif %}">
+          Tutti
+        </a>
+        <a href="?tipo=luce&anno={{ anno_filtro }}&fornitore={{ fornitore_filtro }}&q={{ query }}" class="{% if tipo_filtro == 'luce' %}active electric{% endif %}">
+          ⚡ Solo Luce
+        </a>
+        <a href="?tipo=gas&anno={{ anno_filtro }}&fornitore={{ fornitore_filtro }}&q={{ query }}" class="{% if tipo_filtro == 'gas' %}active gas{% endif %}">
+          🔥 Solo Gas
+        </a>
+      </div>
+
+      <!-- Filtro Anno -->
+      <div style="min-width:140px">
+        <select name="anno">
+          <option value="">Tutti gli anni</option>
+          {% for a in anni %}
+            <option value="{{ a }}" {% if anno_filtro == a|stringformat:"i" %}selected{% endif %}>Anno {{ a }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Filtro Fornitore -->
+      <div style="min-width:170px">
+        <select name="fornitore">
+          <option value="">Tutti i fornitori</option>
+          {% for f in fornitori %}
+            <option value="{{ f }}" {% if fornitore_filtro == f %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Ricerca libera -->
+      <div style="flex:1;min-width:200px">
+        <input type="text" name="q" value="{{ query }}" placeholder="🔍 Cerca POD, PDR, fattura, note...">
+      </div>
+
+      <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
+      
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn">Filtra</button>
+        {% if anno_filtro or fornitore_filtro or query or tipo_filtro != 'tutti' %}
+          <a href="{% url 'archivio' %}" class="btn ghost">Azzera</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <!-- Risultati Bollette Elettriche -->
+  {% if bollette_luce %}
+    <div class="card" style="border-top:3px solid var(--electric)">
+      <div class="card-header">
+        <div>
+          <h2><span>⚡</span> Bollette Elettriche Archiviate ({{ bollette_luce|length }})</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Rilevazione consumi e calcolo tariffa marginale A</span>
+        </div>
+        <span class="badge electric">Monoraria & Accisa</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Periodo</th>
+              <th>Fornitore</th>
+              <th>Fattura N.</th>
+              <th>Consumo</th>
+              <th>Importo Totale</th>
+              <th>€/kWh Marginale</th>
+              <th>€/kWh Finito</th>
+              <th>Temp. Media</th>
+              <th>PUN & Spread</th>
+              <th>PDF</th>
+              <th style="text-align:right">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in bollette_luce %}
+              <tr>
+                <td>
+                  <a href="{% url 'dettaglio_bolletta_luce' b.pk %}" style="color:var(--accent);text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:.86rem">
+                    {{ b.periodo_inizio|date:"d/m/Y" }} → {{ b.periodo_fine|date:"d/m/Y" }}
+                  </a>
+                </td>
+                <td>
+                  <span class="provider-chip">
+                    <span style="color:var(--electric)">⚡</span> {{ b.fornitore }}
+                  </span>
+                </td>
+                <td><code style="color:var(--text-muted)">{{ b.numero_fattura|default:"—" }}</code></td>
+                <td>
+                  <strong style="font-size:.95rem">{{ b.kwh_fatturati }}</strong>
+                  <span style="color:var(--text-dim);font-size:.8rem">kWh</span>
+                </td>
+                <td>
+                  <strong style="font-size:1.02rem;color:#f8fafc">{{ b.importo_totale|default:"—" }} €</strong>
+                </td>
+                <td>
+                  <span class="price-tag" style="color:var(--electric);font-size:1.02rem">{{ b.prezzo_marginale_medio }} €</span>
+                </td>
+                <td>
+                  {% if b.costo_unitario_totale %}
+                    <span class="price-tag" style="color:var(--text-muted)">{{ b.costo_unitario_totale }} €</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if b.temperatura_media %}
+                    <span>{{ b.temperatura_media }} °C</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if b.pun_medio_periodo %}
+                    <div style="font-size:.76rem;color:var(--text-muted)">PUN: {{ b.pun_medio_periodo }}€</div>
+                    <span class="badge {% if b.spread_pun > 0.05 %}warn{% else %}ok{% endif %}" style="padding:1px 6px;font-size:.72rem">
+                      +{{ b.spread_pun }}€
+                    </span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if b.file_bolletta %}
+                    <a href="{{ b.file_bolletta.url }}" target="_blank" class="btn ghost btn-xs" title="Visualizza PDF originale">📄 PDF</a>
+                  {% else %}
+                    <span style="color:var(--text-dim);font-size:.8rem">—</span>
+                  {% endif %}
+                </td>
+                <td style="text-align:right">
+                  <div style="display:inline-flex;gap:6px;align-items:center">
+                    <a href="{% url 'dettaglio_bolletta_luce' b.pk %}" class="btn ghost btn-xs">Dettagli →</a>
+                    <form method="post" action="{% url 'elimina_bolletta_luce' b.pk %}" style="display:inline;margin:0" onsubmit="return confirm('Confermi eliminazione della bolletta?');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn danger btn-xs" title="Elimina">✕</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Risultati Bollette Gas -->
+  {% if bollette_gas %}
+    <div class="card" style="border-top:3px solid var(--gas);margin-top:24px">
+      <div class="card-header">
+        <div>
+          <h2><span>🔥</span> Bollette Gas Archiviate ({{ bollette_gas|length }})</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Rilevazione metri cubi standard e rendimento termico</span>
+        </div>
+        <span class="badge gas">Smc & Standard</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Periodo</th>
+              <th>Fornitore</th>
+              <th>Fattura N.</th>
+              <th>Consumo</th>
+              <th>Importo Totale</th>
+              <th>€/Smc Marginale</th>
+              <th>€/Smc Finito</th>
+              <th>Temp. Media</th>
+              <th>PSV & Spread</th>
+              <th>PDF</th>
+              <th style="text-align:right">Azioni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in bollette_gas %}
+              <tr>
+                <td>
+                  <a href="{% url 'dettaglio_bolletta_gas' b.pk %}" style="color:var(--accent);text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:.86rem">
+                    {{ b.periodo_inizio|date:"d/m/Y" }} → {{ b.periodo_fine|date:"d/m/Y" }}
+                  </a>
+                </td>
+                <td>
+                  <span class="provider-chip">
+                    <span style="color:var(--gas)">🔥</span> {{ b.fornitore }}
+                  </span>
+                </td>
+                <td><code style="color:var(--text-muted)">{{ b.numero_fattura|default:"—" }}</code></td>
+                <td>
+                  <strong style="font-size:.95rem">{{ b.smc_fatturati }}</strong>
+                  <span style="color:var(--text-dim);font-size:.8rem">Smc</span>
+                </td>
+                <td>
+                  <strong style="font-size:1.02rem;color:#f8fafc">{{ b.importo_totale|default:"—" }} €</strong>
+                </td>
+                <td>
+                  <span class="price-tag" style="color:var(--gas);font-size:1.02rem">{{ b.prezzo_marginale_medio_smc }} €</span>
+                </td>
+                <td>
+                  {% if b.costo_unitario_totale %}
+                    <span class="price-tag" style="color:var(--text-muted)">{{ b.costo_unitario_totale }} €</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if b.temperatura_media %}
+                    <span>{{ b.temperatura_media }} °C</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if b.psv_medio_periodo %}
+                    <div style="font-size:.76rem;color:var(--text-muted)">PSV: {{ b.psv_medio_periodo }}€</div>
+                    <span class="badge {% if b.spread_psv > 0.10 %}warn{% else %}ok{% endif %}" style="padding:1px 6px;font-size:.72rem">
+                      +{{ b.spread_psv }}€
+                    </span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if b.file_bolletta %}
+                    <a href="{{ b.file_bolletta.url }}" target="_blank" class="btn ghost btn-xs" title="Visualizza PDF originale">📄 PDF</a>
+                  {% else %}
+                    <span style="color:var(--text-dim);font-size:.8rem">—</span>
+                  {% endif %}
+                </td>
+                <td style="text-align:right">
+                  <div style="display:inline-flex;gap:6px;align-items:center">
+                    <a href="{% url 'dettaglio_bolletta_gas' b.pk %}" class="btn ghost btn-xs">Dettagli →</a>
+                    <form method="post" action="{% url 'elimina_bolletta_gas' b.pk %}" style="display:inline;margin:0" onsubmit="return confirm('Confermi eliminazione della bolletta gas?');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn danger btn-xs" title="Elimina">✕</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Stato Vuoto (nessuna bolletta con filtri) -->
+  {% if not bollette_luce and not bollette_gas %}
+    <div class="card empty-state">
+      <div class="icon">📭</div>
+      <strong style="font-size:1.15rem;display:block;margin-bottom:6px;color:#f8fafc">Nessuna fattura trovata con i filtri selezionati.</strong>
+      <p style="color:var(--text-muted);font-size:.88rem;max-width:440px;margin:0 auto 20px">
+        Prova ad azzerare i filtri di ricerca oppure carica le tue bollette in PDF per iniziare l'analisi.
+      </p>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <a href="{% url 'nuova_bolletta' %}" class="btn btn-electric">+ Bolletta Luce</a>
+        <a href="{% url 'nuova_bolletta_gas' %}" class="btn btn-gas">+ Bolletta Gas</a>
+        <a href="{% url 'caricamento_massivo' %}" class="btn ghost">📦 Caricamento Massivo</a>
+      </div>
+    </div>
+  {% endif %}
+
+{% endblock %}

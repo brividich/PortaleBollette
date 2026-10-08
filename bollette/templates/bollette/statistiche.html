@@ -1,0 +1,480 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Statistiche & Analisi Energetica — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <div class="card-header" style="margin-bottom:24px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <h1 style="font-size:1.55rem;font-weight:800;margin:0;letter-spacing:-0.02em">📊 Statistiche & Bilancio Energetico</h1>
+        <span class="badge info">Analisi Multiannuale</span>
+      </div>
+      <span style="color:var(--text-muted);font-size:.88rem">
+        Riepiloghi storici, bilancio per anno solare, modello termico PRISM e simulatore economico tariffe di mercato.
+      </span>
+    </div>
+    <div style="display:flex;gap:10px">
+      <a href="{% url 'esporta_csv' %}" class="btn ghost">📥 Esporta Archivio (CSV)</a>
+    </div>
+  </div>
+
+  <!-- KPI Generali -->
+  <div class="grid" style="margin-bottom:26px">
+    <div class="metric" style="border-left:3px solid var(--accent)">
+      <div class="label">Spesa Totale Complessiva</div>
+      <div class="value">{{ tot_spesa_complessiva }} <small>€</small></div>
+      <div class="subtext">Luce (<strong>{{ tot_spesa_luce }} €</strong>) + Gas (<strong>{{ tot_spesa_gas }} €</strong>)</div>
+    </div>
+
+    <div class="metric" style="border-left:3px solid var(--electric)">
+      <div class="label">Energia Elettrica Totale</div>
+      <div class="value" style="color:var(--electric)">{{ tot_kwh }} <small>kWh</small></div>
+      <div class="subtext">Costo finito medio: <strong class="price-tag">{{ costo_medio_kwh_finito|default:"—" }} €/kWh</strong></div>
+    </div>
+
+    <div class="metric" style="border-left:3px solid var(--gas)">
+      <div class="label">Gas Metano Totale</div>
+      <div class="value" style="color:var(--gas)">{{ tot_smc }} <small>Smc</small></div>
+      <div class="subtext">Costo finito medio: <strong class="price-tag">{{ costo_medio_smc_finito|default:"—" }} €/Smc</strong></div>
+    </div>
+
+    <div class="metric" style="border-left:3px solid var(--ok)">
+      <div class="label">Spesa Media Stimata / Mese</div>
+      <div class="value">
+        {% if stat_anni %}
+          {% for a, d in stat_anni.items %}
+            {% if forloop.first %}
+              {{ d.spesa_totale|floatformat:2 }} <small>€/anno</small>
+            {% endif %}
+          {% endfor %}
+        {% else %}—{% endif %}
+      </div>
+      <div class="subtext">Ultimo anno solare calcolato</div>
+    </div>
+  </div>
+
+  <!-- Tabella Storica per Anno -->
+  <div class="card" style="margin-bottom:26px">
+    <div class="card-header">
+      <div>
+        <h2><span>📅</span> Bilancio Annuale Consumi & Costi</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Raggruppamento per anno solare ed indici unitari</span>
+      </div>
+      <span class="badge info">Storico Fiscale</span>
+    </div>
+    {% if stat_anni %}
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Anno</th>
+              <th>Spesa Luce (€)</th>
+              <th>Spesa Gas (€)</th>
+              <th>Spesa Totale (€)</th>
+              <th>Energia (kWh)</th>
+              <th>Gas (Smc)</th>
+              <th>Temp. Media</th>
+              <th>€/kWh Finito</th>
+              <th>€/Smc Finito</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for anno, d in stat_anni.items %}
+              <tr>
+                <td><strong style="font-size:1.1rem;color:#f8fafc;font-family:var(--font-mono)">{{ anno }}</strong></td>
+                <td><span class="price-tag" style="color:var(--electric);font-weight:700">{{ d.spesa_luce }} €</span></td>
+                <td><span class="price-tag" style="color:var(--gas);font-weight:700">{{ d.spesa_gas }} €</span></td>
+                <td><strong class="price-tag" style="color:#f8fafc;font-size:1.05rem">{{ d.spesa_totale }} €</strong></td>
+                <td><strong>{{ d.kwh }}</strong> <span style="color:var(--text-dim);font-size:.8rem">kWh</span></td>
+                <td><strong>{{ d.smc }}</strong> <span style="color:var(--text-dim);font-size:.8rem">Smc</span></td>
+                <td>{% if d.temp_media %}<strong>{{ d.temp_media }}</strong> °C{% else %}—{% endif %}</td>
+                <td>
+                  {% if d.kwh > 0 %}
+                    <span class="price-tag">{{ d.spesa_luce|floatformat:4 }} / {{ d.kwh }} €</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if d.smc > 0 %}
+                    <span class="price-tag">{{ d.spesa_gas|floatformat:4 }} / {{ d.smc }} €</span>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state" style="padding:28px">Nessun dato annuale disponibile. Inserisci almeno una bolletta nell'archivio.</div>
+    {% endif %}
+  </div>
+
+  <!-- SEZIONE ANDAMENTO CONSUMI & PICCHI STAGIONALI -->
+  <div class="card" style="margin-bottom:26px">
+    <div class="card-header" style="margin-bottom:16px">
+      <div>
+        <h2 style="font-size:1.3rem;font-weight:800;margin:0"><span>📈</span> Andamento dei Consumi & Picchi Stagionali</h2>
+        <span style="color:var(--text-muted);font-size:.82rem">Analisi del ritmo di consumo giornaliero medio (Pace), picchi invernali ed estivi.</span>
+      </div>
+      <span class="badge info">Ritmo Die</span>
+    </div>
+
+    <!-- KPI Andamento & Picchi -->
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom:20px">
+      <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border-left:3px solid var(--electric);border:1px solid var(--card-border)">
+        <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Ritmo Giornaliero Luce</div>
+        <div style="font-size:1.45rem;font-weight:800;color:var(--electric);font-family:var(--font-display)">{{ media_kwh_giorno }} <small style="font-size:.78rem;color:var(--text-muted)">kWh/giorno</small></div>
+        <div style="font-size:.75rem;color:var(--text-dim);margin-top:4px">
+          Min: {{ min_bolletta_luce.kwh_giorno }} · Max: {{ max_bolletta_luce.kwh_giorno }} kWh/d
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border-left:3px solid var(--gas);border:1px solid var(--card-border)">
+        <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Ritmo Giornaliero Gas</div>
+        <div style="font-size:1.45rem;font-weight:800;color:var(--gas);font-family:var(--font-display)">{{ media_smc_giorno }} <small style="font-size:.78rem;color:var(--text-muted)">Smc/giorno</small></div>
+        <div style="font-size:.75rem;color:var(--text-dim);margin-top:4px">
+          Min: {{ min_bolletta_gas.smc_giorno }} · Max: {{ max_bolletta_gas.smc_giorno }} Smc/d
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border:1px solid var(--card-border)">
+        <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Mese Record Elettricità</div>
+        <div style="font-size:1.3rem;font-weight:800;color:var(--text);font-family:var(--font-display)">
+          {% if max_bolletta_luce %}{{ max_bolletta_luce.kwh_fatturati }} kWh{% else %}—{% endif %}
+        </div>
+        <div style="font-size:.75rem;color:var(--text-dim);margin-top:4px">
+          {{ max_bolletta_luce.periodo_fine|date:"F Y"|default:"—" }} ({{ max_bolletta_luce.fornitore }})
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border:1px solid var(--card-border)">
+        <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Mese Record Riscaldamento</div>
+        <div style="font-size:1.3rem;font-weight:800;color:var(--text);font-family:var(--font-display)">
+          {% if max_bolletta_gas %}{{ max_bolletta_gas.smc_fatturati }} Smc{% else %}—{% endif %}
+        </div>
+        <div style="font-size:.75rem;color:var(--text-dim);margin-top:4px">
+          {{ max_bolletta_gas.periodo_fine|date:"F Y"|default:"—" }} ({{ max_bolletta_gas.fornitore }})
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabella Cronologica Consumi Die -->
+    <div style="display:flex;gap:20px;flex-wrap:wrap">
+      
+      <!-- Cronologia Luce -->
+      <div style="flex:1;min-width:320px">
+        <h3 style="font-size:.95rem;margin:0 0 10px;color:var(--electric)">⚡ Andamento Periodico Luce</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Periodo</th>
+              <th>kWh</th>
+              <th>kWh/giorno</th>
+              <th>€/giorno</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in cronologia_luce %}
+              <tr>
+                <td style="font-family:var(--font-mono);font-size:.82rem">{{ b.periodo_inizio|date:"d/m" }} → {{ b.periodo_fine|date:"d/m/y" }}</td>
+                <td><strong>{{ b.kwh_fatturati }}</strong></td>
+                <td>
+                  <span style="font-weight:700;color:{% if b.kwh_giorno > media_kwh_giorno %}var(--warn){% else %}var(--ok){% endif %}">
+                    {{ b.kwh_giorno }}
+                  </span>
+                </td>
+                <td class="price-tag">{{ b.spesa_giorno|default:"—" }} €</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="empty-state" style="padding:16px">Nessuna bolletta luce archiviata.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cronologia Gas -->
+      <div style="flex:1;min-width:320px">
+        <h3 style="font-size:.95rem;margin:0 0 10px;color:var(--gas)">🔥 Andamento Periodico Gas</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Periodo</th>
+              <th>Smc</th>
+              <th>Smc/giorno</th>
+              <th>€/giorno</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for g in cronologia_gas %}
+              <tr>
+                <td style="font-family:var(--font-mono);font-size:.82rem">{{ g.periodo_inizio|date:"d/m" }} → {{ g.periodo_fine|date:"d/m/y" }}</td>
+                <td><strong>{{ g.smc_fatturati }}</strong></td>
+                <td>
+                  <span style="font-weight:700;color:{% if g.smc_giorno > media_smc_giorno %}var(--warn){% else %}var(--ok){% endif %}">
+                    {{ g.smc_giorno }}
+                  </span>
+                </td>
+                <td class="price-tag">{{ g.spesa_giorno|default:"—" }} €</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="empty-state" style="padding:16px">Nessuna bolletta gas archiviata.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SEZIONE ALGORITMI INTELLIGENTI & MODELLO TERMICO PRISM -->
+  <div style="margin-bottom:26px">
+    <div class="card-header" style="margin-bottom:14px">
+      <div>
+        <h2 style="font-size:1.35rem;font-weight:800;margin:0"><span>🧠</span> Modello Termico PRISM & Regressione Climatica</h2>
+        <span style="color:var(--text-muted);font-size:.82rem">Algoritmo di correlazione lineare (Princeton Scorekeeping Method) tra Gradi Giorno Open-Meteo e consumi reali.</span>
+      </div>
+      <span class="badge info">Algoritmo Ingegneristico</span>
+    </div>
+
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));">
+      
+      <!-- Modello Gas -->
+      <div class="card" style="margin-bottom:0;border-left:4px solid var(--gas)">
+        <div class="card-header" style="margin-bottom:10px">
+          <h2><span>🔥</span> Modello Efficienza Gas Metano</h2>
+          {% if modello_termico_gas %}
+            <span class="badge {% if modello_termico_gas.r_quadro > 0.6 %}ok{% else %}warn{% endif %}">
+              Affidabilità {{ modello_termico_gas.affidabilita }} (R² = {{ modello_termico_gas.r_quadro }})
+            </span>
+          {% else %}
+            <span class="badge off">Dati insufficienti</span>
+          {% endif %}
+        </div>
+        {% if modello_termico_gas %}
+          <div class="grid" style="grid-template-columns: 1fr 1fr;gap:10px;margin-bottom:14px">
+            <div>
+              <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Baseload Fisiologico (ACS)</div>
+              <div style="font-size:1.3rem;font-weight:800;color:var(--gas);font-family:var(--font-mono)">
+                {{ modello_termico_gas.baseload_mensile_stimato }} <small style="font-size:.75rem">Smc/m</small>
+              </div>
+              <div style="font-size:.75rem;color:var(--text-dim)">{{ modello_termico_gas.baseload_giornaliero }} Smc/giorno</div>
+            </div>
+            <div>
+              <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Sensibilità Termica (m)</div>
+              <div style="font-size:1.3rem;font-weight:800;color:var(--text);font-family:var(--font-mono)">
+                {{ modello_termico_gas.sensibilita_termica }} <small style="font-size:.75rem">Smc/HDD</small>
+              </div>
+              <div style="font-size:.75rem;color:var(--text-dim)">Consumo per Grado Giorno</div>
+            </div>
+          </div>
+          <div style="background:rgba(15,23,42,0.6);padding:12px;border-radius:10px;font-size:.82rem;color:var(--text);line-height:1.5;border:1px solid var(--card-border)">
+            <strong>Formula:</strong> <code>Consumo_Smc = ({{ modello_termico_gas.baseload_giornaliero }} × Giorni) + ({{ modello_termico_gas.sensibilita_termica }} × HDD)</code><br>
+            <span style="color:var(--text-muted);font-size:.78rem">{{ modello_termico_gas.spiegazione }}</span>
+          </div>
+        {% else %}
+          <div class="empty-state" style="padding:24px">
+            Servono almeno 2 bollette gas per calcolare il modello di correlazione termica.
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Modello Luce -->
+      <div class="card" style="margin-bottom:0;border-left:4px solid var(--electric)">
+        <div class="card-header" style="margin-bottom:10px">
+          <h2><span>⚡</span> Modello Efficienza Elettrica</h2>
+          {% if modello_termico_luce %}
+            <span class="badge {% if modello_termico_luce.r_quadro > 0.5 %}ok{% else %}info{% endif %}">
+              Affidabilità {{ modello_termico_luce.affidabilita }} (R² = {{ modello_termico_luce.r_quadro }})
+            </span>
+          {% else %}
+            <span class="badge off">Dati insufficienti</span>
+          {% endif %}
+        </div>
+        {% if modello_termico_luce %}
+          <div class="grid" style="grid-template-columns: 1fr 1fr;gap:10px;margin-bottom:14px">
+            <div>
+              <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Baseload Continuo (Standby)</div>
+              <div style="font-size:1.3rem;font-weight:800;color:var(--electric);font-family:var(--font-mono)">
+                {{ modello_termico_luce.baseload_mensile_stimato }} <small style="font-size:.75rem">kWh/m</small>
+              </div>
+              <div style="font-size:.75rem;color:var(--text-dim)">{{ modello_termico_luce.baseload_giornaliero }} kWh/giorno</div>
+            </div>
+            <div>
+              <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Sensibilità Climatica (m)</div>
+              <div style="font-size:1.3rem;font-weight:800;color:var(--text);font-family:var(--font-mono)">
+                {{ modello_termico_luce.sensibilita_termica }} <small style="font-size:.75rem">kWh/HDD</small>
+              </div>
+              <div style="font-size:.75rem;color:var(--text-dim)">Correlazione R: {{ modello_termico_luce.correlazione_r }}</div>
+            </div>
+          </div>
+          <div style="background:rgba(15,23,42,0.6);padding:12px;border-radius:10px;font-size:.82rem;color:var(--text);line-height:1.5;border:1px solid var(--card-border)">
+            <strong>Formula:</strong> <code>Consumo_kWh = ({{ modello_termico_luce.baseload_giornaliero }} × Giorni) + ({{ modello_termico_luce.sensibilita_termica }} × HDD)</code><br>
+            <span style="color:var(--text-muted);font-size:.78rem">{{ modello_termico_luce.spiegazione }}</span>
+          </div>
+        {% else %}
+          <div class="empty-state" style="padding:24px">
+            Servono almeno 2 bollette elettriche per calcolare il baseload continuo e la risposta termica.
+          </div>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
+
+  <!-- CONFRONTI ANNO SU ANNO (YoY) CLIMATE-NORMALIZED -->
+  {% if confronto_yoy_luce or confronto_yoy_gas %}
+    <div class="card" style="margin-bottom:26px">
+      <div class="card-header">
+        <div>
+          <h2><span>🔄</span> Confronto Stesso Periodo Anno Precedente (YoY Normalizzato)</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Normalizzazione per Gradi Giorno riscaldamento</span>
+        </div>
+        <span class="badge info">Climate Normalized</span>
+      </div>
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px">
+        {% if confronto_yoy_luce %}
+          <div style="background:rgba(15,23,42,0.6);padding:16px;border-radius:12px;border:1px solid var(--card-border)">
+            <h3 style="margin:0 0 12px;font-size:1rem;color:var(--electric)">⚡ Elettricità: {{ confronto_yoy_luce.periodo_attuale }} vs {{ confronto_yoy_luce.periodo_anno_fa }}</h3>
+            <table>
+              <tr>
+                <td style="color:var(--text-muted)">Consumo Reale:</td>
+                <td style="text-align:right"><strong>{{ confronto_yoy_luce.consumo_attuale }} kWh</strong> (vs {{ confronto_yoy_luce.consumo_anno_fa }} kWh)</td>
+              </tr>
+              <tr>
+                <td style="color:var(--text-muted)">Scostamento Consumo:</td>
+                <td style="text-align:right">
+                  <span class="badge {% if confronto_yoy_luce.delta_consumo > 0 %}warn{% else %}ok{% endif %}">
+                    {% if confronto_yoy_luce.delta_consumo > 0 %}+{% endif %}{{ confronto_yoy_luce.delta_consumo_pct }}%
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style="color:var(--text-muted)">Spesa Fatturata:</td>
+                <td style="text-align:right" class="price-tag">{{ confronto_yoy_luce.spesa_attuale }} € (vs {{ confronto_yoy_luce.spesa_anno_fa }} €)</td>
+              </tr>
+              {% if confronto_yoy_luce.miglioramento_termico %}
+                <tr>
+                  <td style="color:var(--text-muted)">Efficienza al netto del Clima:</td>
+                  <td style="text-align:right">
+                    <span class="badge {% if confronto_yoy_luce.miglioramento_termico > 0 %}ok{% else %}warn{% endif %}">
+                      {% if confronto_yoy_luce.miglioramento_termico > 0 %}Migliorata +{% endif %}{{ confronto_yoy_luce.miglioramento_termico }}%
+                    </span>
+                  </td>
+                </tr>
+              {% endif %}
+            </table>
+          </div>
+        {% endif %}
+
+        {% if confronto_yoy_gas %}
+          <div style="background:rgba(15,23,42,0.6);padding:16px;border-radius:12px;border:1px solid var(--card-border)">
+            <h3 style="margin:0 0 12px;font-size:1rem;color:var(--gas)">🔥 Gas Metano: {{ confronto_yoy_gas.periodo_attuale }} vs {{ confronto_yoy_gas.periodo_anno_fa }}</h3>
+            <table>
+              <tr>
+                <td style="color:var(--text-muted)">Consumo Reale:</td>
+                <td style="text-align:right"><strong>{{ confronto_yoy_gas.consumo_attuale }} Smc</strong> (vs {{ confronto_yoy_gas.consumo_anno_fa }} Smc)</td>
+              </tr>
+              <tr>
+                <td style="color:var(--text-muted)">Scostamento Consumo:</td>
+                <td style="text-align:right">
+                  <span class="badge {% if confronto_yoy_gas.delta_consumo > 0 %}warn{% else %}ok{% endif %}">
+                    {% if confronto_yoy_gas.delta_consumo > 0 %}+{% endif %}{{ confronto_yoy_gas.delta_consumo_pct }}%
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style="color:var(--text-muted)">Spesa Fatturata:</td>
+                <td style="text-align:right" class="price-tag">{{ confronto_yoy_gas.spesa_attuale }} € (vs {{ confronto_yoy_gas.spesa_anno_fa }} €)</td>
+              </tr>
+              {% if confronto_yoy_gas.miglioramento_termico %}
+                <tr>
+                  <td style="color:var(--text-muted)">Efficienza al netto del Clima:</td>
+                  <td style="text-align:right">
+                    <span class="badge {% if confronto_yoy_gas.miglioramento_termico > 0 %}ok{% else %}warn{% endif %}">
+                      {% if confronto_yoy_gas.miglioramento_termico > 0 %}Migliorata +{% endif %}{{ confronto_yoy_gas.miglioramento_termico }}%
+                    </span>
+                  </td>
+                </tr>
+              {% endif %}
+            </table>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  <!-- Confronto & Simulatore Tariffe -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));">
+    
+    <!-- Simulatore Tariffa Fissa vs Variabile -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header">
+        <div>
+          <h2><span>⚖️</span> Simulatore: Fissa vs Variabile</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Confronto con benchmark di mercato</span>
+        </div>
+        <span class="badge warn">Audit Tariffa</span>
+      </div>
+      <p style="color:var(--text-muted);font-size:.85rem;margin-top:0">
+        Simulazione di spesa se avessi sottoscritto un'offerta a prezzo fisso di <strong>{{ prezzo_fisso_luce }} €/kWh</strong> per l'energia elettrica consumata.
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-muted)">Spesa Elettrica Reale Pagata</td>
+            <td style="text-align:right"><strong class="price-tag">{{ tot_spesa_luce }} €</strong></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Prezzo Fisso Ipotetico di Riferimento</td>
+            <td style="text-align:right" class="price-tag">{{ prezzo_fisso_luce }} €/kWh</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Differenza Stimata vs Offerta Fissa</td>
+            <td style="text-align:right">
+              {% if differenza_luce > 0 %}
+                <span class="badge warn price-tag">+{{ differenza_luce }} € (Speso in più)</span>
+              {% else %}
+                <span class="badge ok price-tag">{{ differenza_luce }} € (Risparmiato!)</span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Analisi Quote Fisse vs Consumo -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header">
+        <div>
+          <h2><span>💡</span> Peso dei Costi Fissi</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Quote indipendenti dal consumo</span>
+        </div>
+        <span class="badge info">Ottimizzazione</span>
+      </div>
+      <p style="color:var(--text-muted);font-size:.85rem;margin-top:0">
+        Nelle bollette italiane, una porzione rilevante è costituita dai <strong>costi fissi (CCV/QVD)</strong> dovuti anche a consumo zero.
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-muted)">Quota Fissa Luce Stimata</td>
+            <td style="text-align:right"><strong class="price-tag">≈ 120.00 €/anno</strong> (10 €/mese)</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Quota Fissa Gas Stimata</td>
+            <td style="text-align:right"><strong class="price-tag">≈ 120.00 €/anno</strong> (10 €/mese)</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Incidenza Fissa Minima Annuo</td>
+            <td style="text-align:right"><strong class="price-tag" style="color:var(--warn)">≈ 240.00 €/anno</strong></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:14px;font-size:.78rem;color:var(--text-dim)">
+        Suggerimento: Quando valuti nuove offerte, confronta sempre la quota fissa annua (PCV/CCV) oltre al prezzo al kWh/Smc.
+      </div>
+    </div>
+
+  </div>
+
+{% endblock %}

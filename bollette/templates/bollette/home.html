@@ -1,0 +1,475 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Dashboard Energetica — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <!-- 1. HERO TOP BAR & GREETING -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+        <span class="badge ok">
+          <span class="pulse-dot"></span> Telemetria Live
+        </span>
+        <span class="badge info" style="font-weight: 600;">
+          Health Score: <strong>{{ health_score.score }}/100</strong> ({{ health_score.giudizio }})
+        </span>
+      </div>
+      <h1 style="font-family: var(--font-display); font-size: 1.85rem; font-weight: 800; margin: 0; letter-spacing: -0.02em;">
+        Cruscotto Energetico
+      </h1>
+      <span style="color: var(--text-muted); font-size: .88rem;">
+        Monitoraggio unificato forniture luce & gas, telemetria Home Assistant e benchmark di mercato.
+      </span>
+    </div>
+
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+      <a href="{% url 'nuova_bolletta' %}" class="btn btn-electric btn-xs">
+        <span>⚡</span> + Bolletta Luce
+      </a>
+      <a href="{% url 'nuova_bolletta_gas' %}" class="btn btn-gas btn-xs">
+        <span>🔥</span> + Bolletta Gas
+      </a>
+      <a href="{% url 'caricamento_massivo' %}" class="btn ghost btn-xs">
+        <span>📦</span> Batch Upload
+      </a>
+    </div>
+  </div>
+
+  <!-- 2. BENTO ROW: 4 KPI PRINCIPALI -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 24px;">
+    
+    <!-- Spesa Totale -->
+    <div class="metric" style="border-left: 3px solid var(--accent);">
+      <div class="label">Spesa Complessiva Archiviata</div>
+      <div class="value">
+        {{ tot_spesa_complessiva }} <small>€</small>
+      </div>
+      <div class="subtext" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <span style="color: var(--electric); font-weight: 600;">⚡ {{ tot_spesa_luce }} €</span>
+        <span style="color: var(--text-dim);">&bull;</span>
+        <span style="color: var(--gas); font-weight: 600;">🔥 {{ tot_spesa_gas }} €</span>
+      </div>
+    </div>
+
+    <!-- Energia Elettrica -->
+    <div class="metric" style="border-left: 3px solid var(--electric);">
+      <div class="label">Energia Elettrica Totale</div>
+      <div class="value" style="color: var(--electric);">
+        {{ tot_kwh }} <small style="color: var(--text-muted);">kWh</small>
+      </div>
+      <div class="subtext" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <span>Tariffa HA: <strong class="price-tag" style="color: var(--electric);">{{ prezzo_ha_luce }} €/kWh</strong></span>
+        <span style="color: var(--text-dim);">{{ conteggio_luce }} fatture</span>
+      </div>
+    </div>
+
+    <!-- Gas Metano -->
+    <div class="metric" style="border-left: 3px solid var(--gas);">
+      <div class="label">Gas Metano Totale</div>
+      <div class="value" style="color: var(--gas);">
+        {{ tot_smc }} <small style="color: var(--text-muted);">Smc</small>
+      </div>
+      <div class="subtext" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <span>Tariffa HA: <strong class="price-tag" style="color: var(--gas);">{{ prezzo_ha_gas }} €/Smc</strong></span>
+        <span style="color: var(--text-dim);">{{ conteggio_gas }} fatture</span>
+      </div>
+    </div>
+
+    <!-- Live Power Casa (Home Assistant) -->
+    <div class="metric" style="border-left: 3px solid var(--ok);">
+      <div class="label" style="display: flex; justify-content: space-between;">
+        <span>Potenza Casa (Live)</span>
+        <span style="color: var(--ok); font-size: .72rem;">● Rete</span>
+      </div>
+      <div class="value" id="dashLiveW" style="color: var(--ok);">
+        {{ device_breakdown.baseload.potenza_totale_casa_w|default:0|floatformat:0 }} <small style="color: var(--text-muted);">W</small>
+      </div>
+      <div class="subtext" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <span>Copertura Shelly: <strong style="color: var(--accent);">{{ device_breakdown.baseload.pct_copertura }}%</strong></span>
+        <span>Standby: <strong>{{ device_breakdown.baseload.potenza_standby_w|floatformat:0 }} W</strong></span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 3. SMART PROJECTION & COMPACT DROPZONE ROW -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-bottom: 24px;">
+    
+    <!-- Proiezione Fine Mese -->
+    {% if proiezione_mese %}
+    <div class="card" style="margin-bottom: 0; padding: 18px 22px;">
+      <div class="card-header" style="margin-bottom: 8px;">
+        <h2 style="font-size: 1.05rem;"><span>🔮</span> Proiezione Fine Mese ({{ proiezione_mese.mese }})</h2>
+        <span class="badge electric" style="font-size: .72rem;">{{ proiezione_mese.percentuale_mese }}% mese</span>
+      </div>
+      <!-- Mini Progress Bar -->
+      <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-bottom: 12px;">
+        <div style="width: {{ proiezione_mese.percentuale_mese }}%; height: 100%; background: linear-gradient(90deg, #38bdf8, #facc15); border-radius: 3px;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div>
+          <span style="font-size: .74rem; color: var(--text-muted); text-transform: uppercase;">Consumo Previsto:</span>
+          <strong style="display: block; font-size: 1.15rem; color: #fff;">{{ proiezione_mese.kwh_proiettati_fine_mese }} kWh</strong>
+        </div>
+        <div style="text-align: right;">
+          <span style="font-size: .74rem; color: var(--text-muted); text-transform: uppercase;">Spesa Stimata:</span>
+          <strong class="price-tag" style="display: block; font-size: 1.25rem; color: var(--ok);">≈ {{ proiezione_mese.spesa_proiettata_totale }} €</strong>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Compact Dropzone Upload -->
+    <div class="card" style="margin-bottom: 0; padding: 18px 22px; border: 2px dashed rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.03);">
+      <form method="post" action="{% url 'upload_pdf_bolletta' %}" enctype="multipart/form-data" id="quickDropForm" style="display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0; flex-wrap: wrap;">
+        {% csrf_token %}
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 1.8rem; filter: drop-shadow(0 0 8px rgba(56,189,248,0.4));">📄</div>
+          <div>
+            <strong style="font-size: .95rem; color: #fff; display: block;">Importazione Rapida Bolletta</strong>
+            <span style="font-size: .78rem; color: var(--text-muted);">Trascina il PDF (qualsiasi fornitore) per autocompilare all'istante</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <label for="home_quick_pdf" class="btn ghost btn-xs" style="cursor: pointer; padding: 7px 14px;">
+            <span>📎</span> Sfoglia PDF
+          </label>
+          <input type="file" name="file_bolletta" id="home_quick_pdf" accept=".pdf" required style="display: none;" onchange="this.form.submit()">
+          <a href="{% url 'caricamento_massivo' %}" class="btn btn-xs">
+            <span>📦</span> Batch
+          </a>
+        </div>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- 4. DUAL COLUMN BENTO: GRAFICO TREND (65%) & LIVE HOME ASSISTANT (35%) -->
+  <div class="grid" style="grid-template-columns: 2fr 1fr; margin-bottom: 24px; align-items: start;">
+    
+    <!-- Colonna Sinistra: Trend Storico Chart -->
+    <div class="card" style="margin-bottom: 0;">
+      <div class="card-header" style="margin-bottom: 12px;">
+        <div>
+          <h2><span>📈</span> Andamento Storico Consumi & Prezzi</h2>
+          <span style="font-size: .78rem; color: var(--text-muted);">Evoluzione temporale delle tariffe marginali e volumi</span>
+        </div>
+        <div class="segmented-control">
+          <button type="button" class="active" id="btnChartLuce" onclick="mostraGrafico('luce')">⚡ Luce</button>
+          <button type="button" id="btnChartGas" onclick="mostraGrafico('gas')">🔥 Gas</button>
+        </div>
+      </div>
+
+      <div style="position: relative; height: 310px; width: 100%;">
+        <canvas id="mainTrendChart"></canvas>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--card-border); font-size: .78rem; color: var(--text-dim); flex-wrap: wrap; gap: 8px;">
+        <span id="chartFooterNote">Dati estratti dalle bollette archiviate con benchmark PUN di borsa integrato.</span>
+        <a href="{% url 'statistiche' %}" style="color: var(--accent); text-decoration: none; font-weight: 600;">
+          Vedi Statistiche Dettagliate &rarr;
+        </a>
+      </div>
+    </div>
+
+    <!-- Colonna Destra: Live Smart Home & Shelly Loads -->
+    <div class="card" style="margin-bottom: 0;">
+      <div class="card-header" style="margin-bottom: 12px;">
+        <div>
+          <h2 style="font-size: 1.1rem;"><span>🔌</span> Carichi Live Casa</h2>
+          <span style="font-size: .76rem; color: var(--text-muted);">Assorbimento istantaneo carichi monitorati</span>
+        </div>
+        <a href="{% url 'dispositivi_ha' %}" class="btn ghost btn-xs" style="padding: 2px 8px; font-size: .72rem;">
+          Tutti &rarr;
+        </a>
+      </div>
+
+      <!-- Lista Carichi Principali -->
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        {% for c in device_breakdown.carichi|slice:":5" %}
+          <div style="background: rgba(255,255,255,0.025); border: 1px solid var(--card-border); border-left: 3px solid {{ c.colore }}; border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.2rem;">{{ c.icon }}</span>
+              <div>
+                <strong style="font-size: .86rem; color: #fff; display: block;">{{ c.nome }}</strong>
+                <span style="font-size: .7rem; color: var(--text-dim);">{{ c.categoria }}</span>
+              </div>
+            </div>
+
+            <div style="text-align: right;">
+              <span class="badge {% if c.is_active %}ok{% else %}off{% endif %}" style="font-size: .72rem; font-family: var(--font-mono); padding: 1px 6px;">
+                {{ c.potenza_w|floatformat:0 }} W
+              </span>
+              <span style="display: block; font-size: .7rem; color: var(--text-muted); margin-top: 2px;">
+                {{ c.kwh }} kWh
+              </span>
+            </div>
+          </div>
+        {% empty %}
+          <div class="empty-state" style="padding: 20px 10px;">
+            <span style="font-size: .84rem; color: var(--text-muted);">Configura Home Assistant per monitorare i carichi Shelly in tempo reale.</span>
+            <div style="margin-top: 10px;">
+              <a href="{% url 'configurazioni' %}" class="btn ghost btn-xs">Configura Token HA</a>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div style="margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center; font-size: .76rem; color: var(--text-dim);">
+        <span>Standby fondo: <strong>{{ device_breakdown.baseload.potenza_standby_w|floatformat:0 }} W</strong></span>
+        <a href="{% url 'confronto_ha' %}" style="color: var(--accent); text-decoration: none;">Audit Congruenza &rarr;</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 5. FEED ULTIME BOLLETTE ARCHIVIATE (CLEAN UNIFIED LIST) -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2><span>🗄️</span> Ultime Bollette Archiviate</h2>
+        <span style="font-size: .8rem; color: var(--text-muted);">Consulta rapidamente le ultime fatture o apri l'archivio completo</span>
+      </div>
+
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <div class="segmented-control">
+          <button type="button" class="active" id="tabFeedTutti" onclick="filtraFeed('tutti')">Tutte</button>
+          <button type="button" id="tabFeedLuce" onclick="filtraFeed('luce')">⚡ Luce</button>
+          <button type="button" id="tabFeedGas" onclick="filtraFeed('gas')">🔥 Gas</button>
+        </div>
+        <a href="{% url 'archivio' %}" class="btn ghost btn-xs">
+          Vedi Tutte ({{ conteggio_luce|add:conteggio_gas }}) &rarr;
+        </a>
+      </div>
+    </div>
+
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Periodo</th>
+            <th>Fornitore</th>
+            <th>Fattura N.</th>
+            <th>Consumo</th>
+            <th>Importo</th>
+            <th>Prezzo Marginale</th>
+            <th>PDF</th>
+            <th style="text-align: right;">Azione</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Righe Luce -->
+          {% for b in bollette_luce %}
+            <tr class="feed-row row-luce">
+              <td>
+                <span class="badge electric" style="font-size: .72rem; padding: 2px 7px;">⚡ Luce</span>
+              </td>
+              <td>
+                <a href="{% url 'dettaglio_bolletta_luce' b.pk %}" style="color: var(--accent); text-decoration: none; font-weight: 700; font-family: var(--font-mono); font-size: .85rem;">
+                  {{ b.periodo_inizio|date:"d/m/Y" }} → {{ b.periodo_fine|date:"d/m/Y" }}
+                </a>
+              </td>
+              <td>
+                <span class="provider-chip">
+                  <span style="color: var(--electric);">⚡</span> {{ b.fornitore }}
+                </span>
+              </td>
+              <td><code style="color: var(--text-muted); font-size: .78rem;">{{ b.numero_fattura|default:"—" }}</code></td>
+              <td>
+                <strong>{{ b.kwh_fatturati }}</strong> <small style="color: var(--text-dim);">kWh</small>
+              </td>
+              <td>
+                <strong style="color: #f8fafc; font-size: .95rem;">{{ b.importo_totale|default:"—" }} €</strong>
+              </td>
+              <td>
+                <span class="price-tag" style="color: var(--electric); font-size: .95rem;">{{ b.prezzo_marginale_medio }} €</span>
+              </td>
+              <td>
+                {% if b.file_bolletta %}
+                  <a href="{{ b.file_bolletta.url }}" target="_blank" class="btn ghost btn-xs" style="padding: 2px 7px; font-size: .75rem;">📄 PDF</a>
+                {% else %}
+                  <span style="color: var(--text-dim); font-size: .75rem;">—</span>
+                {% endif %}
+              </td>
+              <td style="text-align: right;">
+                <a href="{% url 'dettaglio_bolletta_luce' b.pk %}" class="btn ghost btn-xs">Dettagli &rarr;</a>
+              </td>
+            </tr>
+          {% endfor %}
+
+          <!-- Righe Gas -->
+          {% for b in bollette_gas %}
+            <tr class="feed-row row-gas">
+              <td>
+                <span class="badge gas" style="font-size: .72rem; padding: 2px 7px;">🔥 Gas</span>
+              </td>
+              <td>
+                <a href="{% url 'dettaglio_bolletta_gas' b.pk %}" style="color: var(--accent); text-decoration: none; font-weight: 700; font-family: var(--font-mono); font-size: .85rem;">
+                  {{ b.periodo_inizio|date:"d/m/Y" }} → {{ b.periodo_fine|date:"d/m/Y" }}
+                </a>
+              </td>
+              <td>
+                <span class="provider-chip">
+                  <span style="color: var(--gas);">🔥</span> {{ b.fornitore }}
+                </span>
+              </td>
+              <td><code style="color: var(--text-muted); font-size: .78rem;">{{ b.numero_fattura|default:"—" }}</code></td>
+              <td>
+                <strong>{{ b.smc_fatturati }}</strong> <small style="color: var(--text-dim);">Smc</small>
+              </td>
+              <td>
+                <strong style="color: #f8fafc; font-size: .95rem;">{{ b.importo_totale|default:"—" }} €</strong>
+              </td>
+              <td>
+                <span class="price-tag" style="color: var(--gas); font-size: .95rem;">{{ b.prezzo_marginale_medio_smc }} €</span>
+              </td>
+              <td>
+                {% if b.file_bolletta %}
+                  <a href="{{ b.file_bolletta.url }}" target="_blank" class="btn ghost btn-xs" style="padding: 2px 7px; font-size: .75rem;">📄 PDF</a>
+                {% else %}
+                  <span style="color: var(--text-dim); font-size: .75rem;">—</span>
+                {% endif %}
+              </td>
+              <td style="text-align: right;">
+                <a href="{% url 'dettaglio_bolletta_gas' b.pk %}" class="btn ghost btn-xs">Dettagli &rarr;</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SCRIPT CHART.JS & INTERAZIONI DASHBOARD -->
+  <script>
+    const dataLuce = {{ chart_luce_json|safe }};
+    const dataGas = {{ chart_gas_json|safe }};
+
+    let chartInstance = null;
+
+    function renderTrendChart(tipo) {
+      const ctx = document.getElementById('mainTrendChart').getContext('2d');
+      if (chartInstance) chartInstance.destroy();
+
+      const isLuce = (tipo === 'luce');
+      const d = isLuce ? dataLuce : dataGas;
+      const unit = isLuce ? 'kWh' : 'Smc';
+      const mainColor = isLuce ? '#facc15' : '#fb923c';
+      const mainColorAlpha = isLuce ? 'rgba(250, 204, 21, 0.15)' : 'rgba(251, 146, 60, 0.15)';
+
+      chartInstance = new Chart(ctx, {
+        data: {
+          labels: d.labels,
+          datasets: [
+            {
+              type: 'bar',
+              label: `Consumo (${unit})`,
+              data: isLuce ? d.kwh : d.smc,
+              backgroundColor: 'rgba(56, 189, 248, 0.35)',
+              borderColor: '#38bdf8',
+              borderWidth: 1.5,
+              borderRadius: 6,
+              yAxisID: 'yConsumo',
+            },
+            {
+              type: 'line',
+              label: `Prezzo Marginale (€/${unit})`,
+              data: d.prezzi,
+              borderColor: mainColor,
+              backgroundColor: mainColorAlpha,
+              borderWidth: 2.5,
+              pointRadius: 4,
+              pointBackgroundColor: mainColor,
+              tension: 0.3,
+              fill: true,
+              yAxisID: 'yPrezzo',
+            },
+            {
+              type: 'line',
+              label: isLuce ? 'Benchmark PUN (€/kWh)' : 'Benchmark PSV (€/Smc)',
+              data: isLuce ? d.pun : d.psv,
+              borderColor: '#94a3b8',
+              borderDash: [4, 4],
+              borderWidth: 1.5,
+              pointRadius: 0,
+              tension: 0.2,
+              yAxisID: 'yPrezzo',
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11 } }
+            },
+            yConsumo: {
+              type: 'linear',
+              position: 'left',
+              title: { display: true, text: `Consumo (${unit})`, color: '#38bdf8', font: { size: 11 } },
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#38bdf8' }
+            },
+            yPrezzo: {
+              type: 'linear',
+              position: 'right',
+              title: { display: true, text: `Tariffa (€/${unit})`, color: mainColor, font: { size: 11 } },
+              grid: { drawOnChartArea: false },
+              ticks: { color: mainColor }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: { color: '#f8fafc', font: { family: 'Plus Jakarta Sans', size: 11 }, boxWidth: 12 }
+            },
+            tooltip: {
+              backgroundColor: 'rgba(9, 13, 24, 0.95)',
+              borderColor: 'rgba(255,255,255,0.12)',
+              borderWidth: 1,
+              titleColor: '#fff',
+              bodyColor: '#94a3b8',
+              padding: 10
+            }
+          }
+        }
+      });
+    }
+
+    function mostraGrafico(tipo) {
+      document.getElementById('btnChartLuce').className = (tipo === 'luce') ? 'active' : '';
+      document.getElementById('btnChartGas').className = (tipo === 'gas') ? 'active' : '';
+      renderTrendChart(tipo);
+    }
+
+    function filtraFeed(tipo) {
+      document.getElementById('tabFeedTutti').className = (tipo === 'tutti') ? 'active' : '';
+      document.getElementById('tabFeedLuce').className = (tipo === 'luce') ? 'active' : '';
+      document.getElementById('tabFeedGas').className = (tipo === 'gas') ? 'active' : '';
+
+      const rowsLuce = document.querySelectorAll('.row-luce');
+      const rowsGas = document.querySelectorAll('.row-gas');
+
+      if (tipo === 'tutti') {
+        rowsLuce.forEach(r => r.style.display = '');
+        rowsGas.forEach(r => r.style.display = '');
+      } else if (tipo === 'luce') {
+        rowsLuce.forEach(r => r.style.display = '');
+        rowsGas.forEach(r => r.style.display = 'none');
+      } else if (tipo === 'gas') {
+        rowsLuce.forEach(r => r.style.display = 'none');
+        rowsGas.forEach(r => r.style.display = '');
+      }
+    }
+
+    // Inizializzazione al caricamento
+    document.addEventListener('DOMContentLoaded', function() {
+      renderTrendChart('luce');
+    });
+  </script>
+
+{% endblock %}

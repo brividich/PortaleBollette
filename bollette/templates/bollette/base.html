@@ -1,0 +1,932 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Portale Bollette — Smart Energy & Domotica{% endblock %}</title>
+  
+  <!-- Google Fonts: Outfit (Display) + Plus Jakarta Sans (UI) + JetBrains Mono (Numbers/Code) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    :root {
+      --bg: #070913;
+      --bg-sidebar: #090d18;
+      --bg-card: rgba(15, 22, 38, 0.72);
+      --bg-card-hover: rgba(20, 30, 52, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-border-glow: rgba(56, 189, 248, 0.35);
+      
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --accent: #38bdf8;
+      --accent-rgb: 56, 189, 248;
+      --accent-glow: rgba(56, 189, 248, 0.22);
+      
+      --electric: #facc15;
+      --electric-rgb: 250, 204, 21;
+      --electric-glow: rgba(250, 204, 21, 0.2);
+      
+      --gas: #fb923c;
+      --gas-rgb: 251, 146, 60;
+      --gas-glow: rgba(251, 146, 60, 0.2);
+      
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      
+      --font-display: 'Outfit', system-ui, sans-serif;
+      --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+      
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --radius-full: 9999px;
+      
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+      --shadow-md: 0 10px 30px -5px rgba(0, 0, 0, 0.4);
+      --shadow-glow: 0 0 35px -5px rgba(56, 189, 248, 0.15);
+
+      --sidebar-width: 250px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 10% 10%, rgba(56, 189, 248, 0.07) 0%, transparent 40%),
+        radial-gradient(circle at 90% 15%, rgba(250, 204, 21, 0.05) 0%, transparent 35%),
+        radial-gradient(circle at 80% 85%, rgba(251, 146, 60, 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 15% 90%, rgba(74, 222, 128, 0.04) 0%, transparent 35%);
+      background-attachment: fixed;
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+      display: flex;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* APP LAYOUT: SIDEBAR + CONTENT */
+    .app-sidebar {
+      width: var(--sidebar-width);
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 60;
+      padding: 20px 14px;
+      backdrop-filter: blur(20px);
+    }
+
+    .app-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 10px 20px;
+      text-decoration: none;
+      color: inherit;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 18px;
+    }
+    .app-brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.45);
+      flex-shrink: 0;
+    }
+    .app-brand-title {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      background: linear-gradient(120deg, #fff 40%, #bae6fd 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .app-brand-sub {
+      font-size: .72rem;
+      color: var(--text-dim);
+      font-weight: 500;
+      display: block;
+    }
+
+    /* SIDEBAR NAVIGATION */
+    .sidebar-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      flex: 1;
+      overflow-y: auto;
+    }
+    .nav-category {
+      font-size: .68rem;
+      font-weight: 700;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      padding: 12px 12px 4px;
+    }
+    .sidebar-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 14px;
+      border-radius: var(--radius-md);
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: .86rem;
+      font-weight: 600;
+      transition: all .2s ease;
+      position: relative;
+    }
+    .sidebar-link:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+      transform: translateX(2px);
+    }
+    .sidebar-link.active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      font-weight: 700;
+    }
+    .sidebar-link.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 6px;
+      bottom: 6px;
+      width: 3px;
+      border-radius: 0 4px 4px 0;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+    .sidebar-link .icon {
+      font-size: 1.15rem;
+      width: 22px;
+      text-align: center;
+    }
+
+    /* SIDEBAR FOOTER / STATUS */
+    .sidebar-footer {
+      padding-top: 14px;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ha-status-card {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      font-size: .76rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 10px var(--ok);
+      animation: pulse 2s infinite;
+      flex-shrink: 0;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: .4; transform: scale(0.85); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    /* MAIN APP CONTAINER */
+    .app-main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    /* TOPBAR */
+    .app-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      height: 64px;
+      padding: 0 32px;
+      backdrop-filter: blur(20px);
+      background: rgba(7, 9, 19, 0.85);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .ticker-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--card-border);
+      padding: 5px 12px;
+      border-radius: var(--radius-full);
+      font-size: .78rem;
+      color: var(--text-muted);
+    }
+    .ticker-chip strong {
+      color: #f8fafc;
+      font-family: var(--font-mono);
+    }
+
+    /* CONTENT WRAPPER */
+    main {
+      flex: 1;
+      max-width: 1360px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 28px 32px 80px;
+    }
+
+    /* BUTTONS */
+    .btn, button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      background: var(--accent);
+      color: #080d1a;
+      border: none;
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      font-weight: 700;
+      cursor: pointer;
+      font-size: .84rem;
+      font-family: inherit;
+      text-decoration: none;
+      transition: all .2s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn:hover, button:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+    }
+    .btn:active, button:active { transform: translateY(0); }
+
+    .btn.btn-electric {
+      background: linear-gradient(135deg, #eab308, #facc15);
+      color: #0f172a;
+      box-shadow: 0 2px 10px rgba(234, 179, 8, 0.25);
+    }
+    .btn.btn-electric:hover {
+      box-shadow: 0 4px 18px rgba(234, 179, 8, 0.45);
+    }
+
+    .btn.btn-gas {
+      background: linear-gradient(135deg, #f97316, #fb923c);
+      color: #0f172a;
+      box-shadow: 0 2px 10px rgba(249, 115, 22, 0.25);
+    }
+    .btn.btn-gas:hover {
+      box-shadow: 0 4px 18px rgba(249, 115, 22, 0.45);
+    }
+
+    .btn.ghost, button.ghost {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      box-shadow: none;
+    }
+    .btn.ghost:hover, button.ghost:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: #fff;
+    }
+
+    .btn.btn-xs {
+      padding: 4px 10px;
+      font-size: .76rem;
+      border-radius: var(--radius-sm);
+    }
+    .btn.danger, button.danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    .btn.danger:hover, button.danger:hover {
+      background: rgba(239, 68, 68, 0.3);
+      color: #fff;
+    }
+
+    /* CARDS & CONTAINERS */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg);
+      padding: 24px 28px;
+      margin-bottom: 24px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: var(--shadow-md);
+      transition: all .25s ease;
+      position: relative;
+    }
+    .card:hover {
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .card-header h2, .card-header h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* GRID & BENTO METRICS */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 18px;
+    }
+    .metric {
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius-md);
+      padding: 20px 22px;
+      transition: all .25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.14);
+      transform: translateY(-2px);
+    }
+    .metric .label {
+      color: var(--text-muted);
+      font-size: .78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 6px;
+    }
+    .metric .value {
+      font-family: var(--font-display);
+      font-size: 1.95rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #fff;
+      line-height: 1.1;
+    }
+    .metric .value small {
+      font-size: .92rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-family: var(--font-body);
+    }
+    .metric .subtext {
+      font-size: .78rem;
+      color: var(--text-dim);
+      margin-top: 8px;
+    }
+
+    /* BADGES */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      font-size: .76rem;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+    .badge.ok { background: rgba(74, 222, 128, 0.12); color: var(--ok); border: 1px solid rgba(74, 222, 128, 0.3); }
+    .badge.off { background: rgba(248, 113, 113, 0.12); color: var(--err); border: 1px solid rgba(248, 113, 113, 0.3); }
+    .badge.warn { background: rgba(251, 191, 36, 0.12); color: var(--warn); border: 1px solid rgba(251, 191, 36, 0.3); }
+    .badge.info { background: rgba(56, 189, 248, 0.12); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.3); }
+    .badge.electric { background: var(--electric-glow); color: var(--electric); border: 1px solid rgba(250, 204, 21, 0.35); }
+    .badge.gas { background: var(--gas-glow); color: var(--gas); border: 1px solid rgba(251, 146, 60, 0.35); }
+
+    /* TABLES */
+    table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--card-border); font-size: .88rem; }
+    th {
+      color: var(--text-muted);
+      font-weight: 700;
+      font-size: .74rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background .15s ease; }
+    tbody tr:hover td { background: rgba(255, 255, 255, 0.04); }
+
+    /* MESSAGES & ALERTS */
+    .messages { list-style: none; padding: 0; margin: 0 0 24px; }
+    .messages li {
+      padding: 13px 18px;
+      border-radius: var(--radius-md);
+      margin-bottom: 10px;
+      font-size: .88rem;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+    .messages li.success { background: rgba(74, 222, 128, 0.12); border: 1px solid var(--ok); color: #bbf7d0; }
+    .messages li.warning { background: rgba(251, 191, 36, 0.12); border: 1px solid var(--warn); color: #fef08a; }
+    .messages li.error { background: rgba(248, 113, 113, 0.12); border: 1px solid var(--err); color: #fecaca; }
+    .messages li.info { background: rgba(56, 189, 248, 0.12); border: 1px solid var(--accent); color: #bae6fd; }
+
+    code {
+      font-family: var(--font-mono);
+      background: rgba(148, 163, 184, 0.12);
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: .85em;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* FORM ELEMENTS & INPUTS */
+    input[type="text"], input[type="number"], input[type="date"], input[type="file"], select, textarea {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 9px 13px;
+      font-size: .88rem;
+      font-family: inherit;
+      transition: all .2s ease;
+      outline: none;
+    }
+    input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus, select:focus, textarea:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.22);
+      background: rgba(15, 23, 42, 0.95);
+    }
+    input::placeholder, textarea::placeholder {
+      color: var(--text-dim);
+    }
+    select option {
+      background: #0f172a;
+      color: #f8fafc;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .form-grid .full-width {
+      grid-column: 1 / -1;
+    }
+    .field label {
+      display: block;
+      font-size: .78rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 6px;
+    }
+    .field small.help {
+      display: block;
+      font-size: .74rem;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+    .field small.err {
+      display: block;
+      font-size: .74rem;
+      color: var(--err);
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    /* SEGMENTED CONTROLS & SUBNAV */
+    .segmented-control {
+      display: inline-flex;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 4px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--card-border);
+      gap: 4px;
+    }
+    .segmented-control a, .segmented-control button {
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 5px 14px;
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-size: .82rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all .2s ease;
+      box-shadow: none;
+    }
+    .segmented-control a:hover, .segmented-control button:hover {
+      color: #fff;
+      transform: none;
+    }
+    .segmented-control a.active, .segmented-control button.active {
+      background: rgba(56, 189, 248, 0.16);
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.35);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    .segmented-control a.active.electric {
+      background: rgba(250, 204, 21, 0.18);
+      color: var(--electric);
+      border-color: rgba(250, 204, 21, 0.35);
+    }
+    .segmented-control a.active.gas {
+      background: rgba(251, 146, 60, 0.18);
+      color: var(--gas);
+      border-color: rgba(251, 146, 60, 0.35);
+    }
+
+    .sub-nav {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 22px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .sub-nav a, .sub-nav button {
+      color: var(--text-muted);
+      padding: 7px 15px;
+      border-radius: var(--radius-md);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: .85rem;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid transparent;
+      transition: all .2s ease;
+      cursor: pointer;
+      box-shadow: none;
+    }
+    .sub-nav a:hover, .sub-nav button:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.1);
+      transform: none;
+    }
+    .sub-nav a.active, .sub-nav button.active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    /* PROVIDER CHIPS & PRICE TAGS */
+    .provider-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: var(--radius-full);
+      font-size: .78rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      color: #e2e8f0;
+    }
+    .price-tag {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .empty-state {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+    .empty-state .icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+      opacity: .8;
+    }
+
+    /* FOOTER */
+    footer {
+      border-top: 1px solid var(--card-border);
+      background: rgba(7, 9, 19, 0.95);
+      padding: 24px 32px;
+      font-size: .82rem;
+      color: var(--text-muted);
+    }
+    .footer-inner {
+      max-width: 1360px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    /* MODAL */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(10px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius-lg);
+      max-width: 800px;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 26px 30px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 960px) {
+      .app-sidebar {
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+      }
+      .app-sidebar.open {
+        transform: translateX(0);
+      }
+      .app-main {
+        margin-left: 0;
+      }
+      .mobile-menu-btn {
+        display: inline-flex !important;
+      }
+    }
+    @media (min-width: 961px) {
+      .mobile-menu-btn {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- APP SIDEBAR -->
+  <aside class="app-sidebar" id="appSidebar">
+    <a href="{% url 'home' %}" class="app-brand">
+      <div class="app-brand-icon">⚡</div>
+      <div>
+        <span class="app-brand-title">Portale Bollette</span>
+        <span class="app-brand-sub">Smart Energy Hub</span>
+      </div>
+    </a>
+
+    <!-- Nav Links -->
+    <nav class="sidebar-nav">
+      <span class="nav-category">Dashboard</span>
+      <a href="{% url 'home' %}" class="sidebar-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
+        <span class="icon">⚡</span> Dashboard
+      </a>
+      <a href="{% url 'archivio' %}" class="sidebar-link {% if request.resolver_match.url_name == 'archivio' %}active{% endif %}">
+        <span class="icon">🗄️</span> Archivio Bollette
+      </a>
+      <a href="{% url 'statistiche' %}" class="sidebar-link {% if request.resolver_match.url_name == 'statistiche' %}active{% endif %}">
+        <span class="icon">📊</span> Statistiche & Bilancio
+      </a>
+
+      <span class="nav-category">Domotica & Clima</span>
+      <a href="{% url 'dispositivi_ha' %}" class="sidebar-link {% if request.resolver_match.url_name == 'dispositivi_ha' %}active{% endif %}">
+        <span class="icon">🔌</span> Dispositivi HA
+      </a>
+      <a href="{% url 'confronto_ha' %}" class="sidebar-link {% if request.resolver_match.url_name == 'confronto_ha' %}active{% endif %}">
+        <span class="icon">🔍</span> Audit Congruenza
+      </a>
+      <a href="{% url 'netatmo_dashboard' %}" class="sidebar-link {% if request.resolver_match.url_name == 'netatmo_dashboard' %}active{% endif %}">
+        <span class="icon">🔥</span> Netatmo Caldaia
+      </a>
+
+      <span class="nav-category">Strumenti</span>
+      <a href="{% url 'caricamento_massivo' %}" class="sidebar-link {% if request.resolver_match.url_name == 'caricamento_massivo' %}active{% endif %}">
+        <span class="icon">📦</span> Batch Upload PDF
+      </a>
+      <a href="{% url 'configurazioni' %}" class="sidebar-link {% if request.resolver_match.url_name == 'configurazioni' %}active{% endif %}">
+        <span class="icon">⚙️</span> Centro Controllo
+      </a>
+    </nav>
+
+    <!-- Sidebar Footer -->
+    <div class="sidebar-footer">
+      <div class="ha-status-card">
+        <span class="pulse-dot"></span>
+        <div style="overflow:hidden">
+          <strong style="color:#f8fafc;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">HA Bridge</strong>
+          <span style="color:var(--text-muted);font-size:.7rem">Rete Locale Connessa</span>
+        </div>
+      </div>
+      <button type="button" class="btn ghost btn-xs w-100" onclick="openDiscoveryModal()">
+        <span>📡</span> Esamina Sensori HA
+      </button>
+    </div>
+  </aside>
+
+  <!-- APP MAIN -->
+  <div class="app-main">
+    
+    <!-- TOPBAR -->
+    <header class="app-topbar">
+      <div class="topbar-left">
+        <button type="button" class="btn ghost btn-xs mobile-menu-btn" onclick="toggleSidebar()">
+          ☰ Menu
+        </button>
+        <div class="ticker-chip">
+          <span>⚡ Borsa PUN:</span>
+          <strong>0.118 €/kWh</strong>
+        </div>
+        <div class="ticker-chip">
+          <span>🔥 Borsa PSV:</span>
+          <strong>0.385 €/Smc</strong>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <a href="{% url 'nuova_bolletta' %}" class="btn btn-electric btn-xs">
+          <span>⚡</span> + Bolletta Luce
+        </a>
+        <a href="{% url 'nuova_bolletta_gas' %}" class="btn btn-gas btn-xs">
+          <span>🔥</span> + Bolletta Gas
+        </a>
+        <a href="{% url 'caricamento_massivo' %}" class="btn ghost btn-xs">
+          <span>📦</span> Batch Upload
+        </a>
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main>
+      {% if messages %}
+        <ul class="messages">
+          {% for message in messages %}
+            <li class="{{ message.tags }}">
+              {% if message.tags == 'success' %}<span>✅</span>
+              {% elif message.tags == 'warning' %}<span>⚠️</span>
+              {% elif message.tags == 'error' %}<span>❌</span>
+              {% else %}<span>ℹ️</span>{% endif %}
+              <div>{{ message }}</div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <div>
+          <strong style="color: #fff;">Portale Bollette</strong> &bull; Gestione Intelligente Energia & Domotica
+          <div style="font-size: .76rem; color: var(--text-dim); margin-top: 3px;">
+            Parser Multi-Fornitore ARERA &bull; Home Assistant REST Bridge &bull; Normalizzazione Open-Meteo
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span class="badge ok">● Server Attivo (Porta 8001)</span>
+          <a href="/admin/" style="color:var(--text-muted);font-size:.78rem;text-decoration:none">Admin Django &rarr;</a>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Modal Discovery Home Assistant -->
+  <div id="discoveryModal" class="modal-backdrop">
+    <div class="modal">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0; font-size: 1.2rem; font-family: var(--font-display);">🔍 Sensori Rilevati in Home Assistant</h3>
+        <button type="button" class="btn ghost btn-xs" onclick="closeDiscoveryModal()">✕</button>
+      </div>
+      <p style="color: var(--text-muted); font-size: .85rem; margin-top: 0;">
+        Entità energetiche (consumi, contatori, Shelly, PUN) scoperte in tempo reale tramite REST API nativa di Home Assistant.
+      </p>
+      <div id="discoveryLoading" style="padding: 24px; text-align: center; color: var(--text-muted);">
+        Interrogazione di Home Assistant in corso...
+      </div>
+      <div id="discoveryContent" style="display: none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Entity ID</th>
+              <th>Nome</th>
+              <th>Stato</th>
+              <th>Unità</th>
+            </tr>
+          </thead>
+          <tbody id="discoveryTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function toggleSidebar() {
+      const sb = document.getElementById('appSidebar');
+      sb.classList.toggle('open');
+    }
+
+    function openDiscoveryModal() {
+      const modal = document.getElementById('discoveryModal');
+      modal.classList.add('open');
+      const loading = document.getElementById('discoveryLoading');
+      const content = document.getElementById('discoveryContent');
+      const tbody = document.getElementById('discoveryTableBody');
+      loading.style.display = 'block';
+      content.style.display = 'none';
+      tbody.innerHTML = '';
+
+      fetch('/api/ha/discovery/')
+        .then(r => r.json())
+        .then(data => {
+          loading.style.display = 'none';
+          content.style.display = 'block';
+          if (!data.sensori || data.sensori.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Nessun sensore energetico rilevato o Home Assistant non raggiungibile.</td></tr>';
+            return;
+          }
+          data.sensori.forEach(s => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td><code>${s.entity_id}</code></td>
+              <td>${s.name}</td>
+              <td><strong>${s.state}</strong></td>
+              <td><span class="badge ok">${s.unit || '—'}</span></td>
+            `;
+            tbody.appendChild(tr);
+          });
+        })
+        .catch(err => {
+          loading.innerHTML = 'Errore durante la connessione ad Home Assistant.';
+        });
+    }
+
+    function closeDiscoveryModal() {
+      document.getElementById('discoveryModal').classList.remove('open');
+    }
+  </script>
+</body>
+</html>

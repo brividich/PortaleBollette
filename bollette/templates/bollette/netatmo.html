@@ -1,0 +1,481 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Netatmo Riscaldamento & Efficienza Caldaia — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <div class="card-header" style="margin-bottom:20px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <h1 style="font-size:1.55rem;font-weight:800;margin:0;letter-spacing:-0.02em">🔥 Netatmo & Riscaldamento Smart</h1>
+        <span class="badge gas">Termostato & Caldaia</span>
+        {% if stat.disponibile %}
+          <span class="badge ok">✓ Dati Attivi</span>
+        {% else %}
+          <span class="badge warn">Nessun file caricato</span>
+        {% endif %}
+      </div>
+      <span style="color:var(--text-muted);font-size:.88rem">
+        Importazione telemetria Netatmo Energy WebApp, calcolo ore fiamma bruciatore, rendimento Smc/ora e correlazione con le bollette del gas.
+      </span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      {% if stat.disponibile %}
+        <form method="post" action="{% url 'netatmo_sincronizza' %}" style="margin:0">
+          {% csrf_token %}
+          <button type="submit" class="btn ghost" title="Ricalcola ore caldaia e rendimento su tutte le bollette gas">
+            🔄 Ricalcola Bollette Gas
+          </button>
+        </form>
+        <form method="post" action="{% url 'netatmo_svuota' %}" style="margin:0" onsubmit="return confirm('Sei sicuro di voler cancellare tutti i record Netatmo caricati?');">
+          {% csrf_token %}
+          <button type="submit" class="btn danger">🗑️ Svuota Archivio Netatmo</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Sotto-Navigazione Hub HA / Energia -->
+  <div class="sub-nav">
+    <a href="{% url 'dispositivi_ha' %}">🔌 Dispositivi & Live Metering</a>
+    <a href="{% url 'confronto_ha' %}">🔍 Audit Congruenza Bollette</a>
+    <a href="{% url 'netatmo_dashboard' %}" class="active">🔥 Netatmo Riscaldamento</a>
+    <button type="button" onclick="openDiscoveryModal()">📡 Sensori Rilevati HA</button>
+  </div>
+
+  <!-- KPI Metriche Netatmo -->
+  <div class="grid" style="margin-bottom:24px">
+    <div class="metric" style="border-left:3px solid var(--gas)">
+      <div class="label">Giorni Monitorati</div>
+      <div class="value" style="color:var(--gas)">{{ stat.tot_giorni }} <small>giorni</small></div>
+      <div class="subtext">
+        {% if stat.prima_data %}
+          Dal <strong>{{ stat.prima_data|date:"d/m/Y" }}</strong> al <strong>{{ stat.ultima_data|date:"d/m/Y" }}</strong>
+        {% else %}
+          Carica un file CSV per iniziare
+        {% endif %}
+      </div>
+    </div>
+    <div class="metric" style="border-left:3px solid #f97316">
+      <div class="label">Ore Accensione Caldaia</div>
+      <div class="value" style="color:#f97316">{{ stat.ore_caldaia_totali }} <small>ore</small></div>
+      <div class="subtext">{{ stat.giorni_accesi }} giorni con riscaldamento attivo</div>
+    </div>
+    <div class="metric" style="border-left:3px solid var(--electric)">
+      <div class="label">Media Giornaliera Riscaldamento</div>
+      <div class="value">{{ stat.media_ore_giorno_attivo }} <small>h/giorno</small></div>
+      <div class="subtext">Calcolata solo sui giorni di accensione</div>
+    </div>
+    <div class="metric" style="border-left:3px solid var(--accent)">
+      <div class="label">Temperatura Interna Media</div>
+      <div class="value" style="color:var(--accent)">
+        {% if stat.temp_interna_media %}{{ stat.temp_interna_media }} <small>°C</small>{% else %}—{% endif %}
+      </div>
+      <div class="subtext">
+        Setpoint medio: {% if stat.temp_setpoint_media %}<strong>{{ stat.temp_setpoint_media }} °C</strong>{% else %}—{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- SEZIONE CLOUD: SINCRONIZZAZIONE DIRETTA CLOUD API NETATMO -->
+  <div class="card" style="margin-bottom:24px;border-left:4px solid var(--accent)">
+    <div class="card-header">
+      <div style="display:flex;align-items:center;gap:10px">
+        <h2 style="margin:0"><span>⚡</span> Netatmo Connect Cloud API</h2>
+        {% if api_configurata %}
+          <span class="badge ok">✓ API Connesse</span>
+          {% if live_status.online %}
+            <span class="badge {% if live_status.boiler_active %}gas{% else %}info{% endif %}">
+              {% if live_status.boiler_active %}🔥 Caldaia Accesa Ora{% else %}Caldaia Standby{% endif %}
+            </span>
+          {% endif %}
+        {% else %}
+          <span class="badge warn">API Non Configurate</span>
+        {% endif %}
+      </div>
+      <a href="{% url 'configurazioni' %}#sezioneNetatmo" class="btn ghost btn-xs">
+        ⚙️ Imposta Credenziali API &rarr;
+      </a>
+    </div>
+
+    {% if api_configurata %}
+      <!-- Live Telemetry Box -->
+      {% if live_status.online %}
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));gap:12px;margin:14px 0">
+        <div style="background:rgba(255,255,255,0.03);padding:12px 14px;border-radius:10px;border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Temp. Ambiente Live</div>
+          <div style="font-size:1.35rem;font-weight:800;color:var(--accent);font-family:var(--font-display)">{{ live_status.room_temp|default:"—" }} <small style="font-size:.75rem">°C</small></div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);padding:12px 14px;border-radius:10px;border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Setpoint Impostato</div>
+          <div style="font-size:1.35rem;font-weight:800;color:var(--ok);font-family:var(--font-display)">{{ live_status.setpoint|default:"—" }} <small style="font-size:.75rem">°C</small></div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);padding:12px 14px;border-radius:10px;border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Stato Caldaia</div>
+          <div style="font-size:1.35rem;font-weight:800;color:{% if live_status.boiler_active %}var(--gas){% else %}var(--text-dim){% endif %};font-family:var(--font-display)">
+            {% if live_status.boiler_active %}🔥 Fiamma ATTIVA{% else %}Inattiva (OFF){% endif %}
+          </div>
+        </div>
+        {% if live_status.battery_percent %}
+        <div style="background:rgba(255,255,255,0.03);padding:12px 14px;border-radius:10px;border:1px solid var(--card-border)">
+          <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Batteria Termostato</div>
+          <div style="font-size:1.35rem;font-weight:800;color:var(--text);font-family:var(--font-mono)">{{ live_status.battery_percent }}%</div>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Azione di Sincronizzazione Cloud con 1 Clic -->
+      <form method="post" action="{% url 'netatmo_sync_api' %}" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px">
+        {% csrf_token %}
+        <span style="font-size:.88rem;color:var(--text);font-weight:600">Intervallo da sincronizzare:</span>
+        <select name="giorni" style="max-width:260px">
+          <option value="30">Ultimi 30 giorni</option>
+          <option value="90" selected>Ultimi 90 giorni (Consigliato)</option>
+          <option value="180">Ultimi 6 mesi (180 giorni)</option>
+          <option value="365">Ultimo anno (365 giorni)</option>
+        </select>
+        <button type="submit" class="btn" style="background:linear-gradient(135deg, #0284c7, #38bdf8);color:#080d1a">
+          ⚡ Scarica Misure & Ricalcola Bollette Gas
+        </button>
+      </form>
+    {% else %}
+      <p style="color:var(--text-muted);font-size:.86rem;margin:8px 0 14px;line-height:1.5">
+        Le API Cloud ti consentono di scaricare automaticamente lo storico delle ore di accensione caldaia e temperature direttamente dai server Netatmo con un clic, <strong>senza scaricare file CSV a mano</strong>.
+      </p>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <a href="{% url 'configurazioni' %}#sezioneNetatmo" class="btn">
+          ⚙️ Configura API Netatmo (Client ID & Token) &rarr;
+        </a>
+        <span style="color:var(--text-dim);font-size:.82rem">Oppure continua usando il caricamento file CSV qui sotto.</span>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Sincronizzazione Diretta tramite Home Assistant (Opzione Locale) -->
+  <div class="card" style="margin-bottom:24px;border-left:4px solid var(--ok)">
+    <div class="card-header" style="margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <h2><span>📡</span> Sincronizzazione Diretta da Home Assistant</h2>
+        <span class="badge ok">Rete Locale · Zero Configurazione Cloud</span>
+      </div>
+      <form method="post" action="{% url 'netatmo_sync_ha' %}" style="margin:0">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="background:var(--ok);color:#052e16">
+          🔄 Acquisisci Misure da HA Ora
+        </button>
+      </form>
+    </div>
+    <p style="color:var(--text-muted);font-size:.84rem;margin:0;line-height:1.5">
+      Il tuo Home Assistant è già connesso al termostato Netatmo (<code>climate.netatmo_smart_thermostat</code>).
+      Cliccando questo pulsante, il Portale acquisisce istantaneamente la temperatura ambiente rilevata, il setpoint e lo stato della caldaia senza bisogno di scaricare CSV o configurare API cloud.
+    </p>
+  </div>
+
+  <!-- Sezione Upload File CSV Netatmo (Alternativa / Archivio Storico) -->
+  <div class="card" style="margin-bottom:24px;border-left:4px solid var(--gas)">
+    <div class="card-header">
+      <div>
+        <h2><span>📤</span> Carica File Storico Netatmo Energy (CSV)</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Riconoscimento automatico colonne & timestamp</span>
+      </div>
+      <span class="badge info">Auto-detect</span>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" style="margin-top:10px">
+      {% csrf_token %}
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          {{ form.file_netatmo }}
+        </div>
+        <button type="submit" class="btn btn-gas">
+          🚀 Elabora & Correla Bollette Gas
+        </button>
+      </div>
+    </form>
+
+    <!-- Mini-guida a comparsa -->
+    <details style="margin-top:16px;background:rgba(255,255,255,0.03);border:1px solid var(--card-border);border-radius:10px;padding:12px 16px">
+      <summary style="cursor:pointer;font-weight:600;color:var(--accent);font-size:.88rem">
+        ℹ️ Come esportare il file CSV dalla WebApp Netatmo in 3 passaggi
+      </summary>
+      <div style="font-size:.84rem;color:var(--text-muted);line-height:1.6;margin-top:10px">
+        <ol style="margin:0;padding-left:20px">
+          <li>Accedi da browser a <a href="https://home.netatmo.com" target="_blank" style="color:var(--accent)">home.netatmo.com</a> con le tue credenziali.</li>
+          <li>Vai su <strong>Impostazioni</strong> (icona ingranaggio) &rarr; <strong>Gestione Dati</strong> &rarr; <strong>Download / Scarica dati</strong>.</li>
+          <li>Seleziona il periodo desiderato e clicca su <strong>Scarica CSV</strong>.</li>
+          <li>Trascina o carica direttamente il file ottenuto qui sopra! Il portale riconosce automaticamente sia le date Unix che GG/MM/AAAA, i delimitatori virgola/punto e virgola e le colonne di durata caldaia (<code>BoilerOn</code>) e temperatura.</li>
+        </ol>
+      </div>
+    </details>
+  </div>
+
+  {% if stat.disponibile %}
+  <!-- Grafico Temporale Interattivo Chart.js -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <div>
+        <h2><span>📈</span> Andamento Riscaldamento & Temperature</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Correlazione fiamma caldaia, temperatura ambiente e setpoint</span>
+      </div>
+      <span class="badge gas">Barre: Ore Caldaia · Linee: Temp. & Setpoint</span>
+    </div>
+    <div style="position:relative;height:340px;width:100%">
+      <canvas id="chartNetatmo"></canvas>
+    </div>
+  </div>
+
+  <!-- Tabella Riepilogo Mensile -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-header">
+      <div>
+        <h2><span>🗓️</span> Bilancio Mensile Riscaldamento & Bollette Gas</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Rendimento combustione Smc/ora per ciascun mese solare</span>
+      </div>
+      <span class="badge info">{{ stat.mesi|length }} Mesi Rilevati</span>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Mese</th>
+            <th>Giorni Accesi / Totali</th>
+            <th>Ore Caldaia</th>
+            <th>Temp. Media Interna</th>
+            <th>Smc Gas in Bolletta</th>
+            <th>Rendimento Caldaia</th>
+            <th>Spesa Gas</th>
+            <th style="text-align:right">Scheda</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in stat.mesi %}
+            <tr>
+              <td><strong>{{ m.label }}</strong></td>
+              <td>
+                {{ m.giorni_accesi }} su {{ m.giorni }} gg
+                <div style="font-size:.74rem;color:var(--text-dim)">({{ m.giorni_accesi|floatformat:0 }} giorni fiamma attiva)</div>
+              </td>
+              <td>
+                <strong style="color:var(--gas);font-size:1.05rem;font-family:var(--font-mono)">{{ m.ore_caldaia }} h</strong>
+              </td>
+              <td>
+                {% if m.temp_media %}
+                  <span style="color:var(--accent);font-weight:700">{{ m.temp_media }} °C</span>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if m.smc_bolletta %}
+                  <strong>{{ m.smc_bolletta }} Smc</strong>
+                {% else %}
+                  <span style="color:var(--text-dim);font-size:.8rem">Nessuna bolletta</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if m.smc_ora %}
+                  <span class="badge ok price-tag">
+                    {{ m.smc_ora }} Smc/h
+                  </span>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if m.spesa_bolletta %}
+                  <strong class="price-tag">{{ m.spesa_bolletta }} €</strong>
+                {% else %}—{% endif %}
+              </td>
+              <td style="text-align:right">
+                {% if m.bolletta_id %}
+                  <a href="{% url 'dettaglio_bolletta_gas' m.bolletta_id %}" class="btn ghost btn-xs">
+                    Dettaglio →
+                  </a>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Tabella Correlazione con Tutte le Bollette Gas Archiviate -->
+  <div class="card" style="border-top:3px solid var(--gas)">
+    <div class="card-header">
+      <div>
+        <h2><span>📊</span> Bollette Gas Archiviate & Correlazione Caldaia</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Verifica copertura ore di fiamma e disaggregazione riscaldamento vs ACS</span>
+      </div>
+      <span class="badge gas">{{ bollette_gas|length }} Bollette Gas</span>
+    </div>
+
+    {% if bollette_gas %}
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Periodo Bolletta</th>
+            <th>Fornitore</th>
+            <th>Smc Fatturati</th>
+            <th>Ore Caldaia Netatmo</th>
+            <th>Consumo Orario (Smc/h)</th>
+            <th>Costo Orario (€/h)</th>
+            <th>Temp. Int. Netatmo</th>
+            <th>Scomposizione Stimata</th>
+            <th style="text-align:right">Azione</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in bollette_gas %}
+            <tr>
+              <td>
+                <strong style="font-family:var(--font-mono);font-size:.84rem">{{ b.periodo_inizio|date:"d/m/Y" }} &rarr; {{ b.periodo_fine|date:"d/m/Y" }}</strong>
+                <div style="font-size:.74rem;color:var(--text-dim)">{{ b.giorni_periodo }} giorni</div>
+              </td>
+              <td>
+                <span class="provider-chip">
+                  <span style="color:var(--gas)">🔥</span> {{ b.fornitore }}
+                </span>
+              </td>
+              <td><strong>{{ b.smc_fatturati }} Smc</strong></td>
+              <td>
+                {% if b.ore_caldaia %}
+                  <span style="color:var(--gas);font-weight:700;font-family:var(--font-mono)">{{ b.ore_caldaia }} h</span>
+                {% else %}
+                  <span style="color:var(--text-dim);font-size:.8rem">Nessun dato coperto</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if b.smc_ora_caldaia %}
+                  <strong class="price-tag" style="color:var(--accent)">{{ b.smc_ora_caldaia }}</strong> <small>Smc/h</small>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if b.costo_ora_caldaia %}
+                  <strong class="price-tag" style="color:var(--ok)">{{ b.costo_ora_caldaia }}</strong> <small>€/h</small>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if b.temp_interna_media %}
+                  <span style="color:var(--accent);font-weight:700">{{ b.temp_interna_media }} °C</span>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if b.smc_riscaldamento_stimati %}
+                  <div style="font-size:.78rem;line-height:1.4">
+                    <span style="color:var(--gas)">🔥 Riscaldamento: <strong>{{ b.smc_riscaldamento_stimati }} Smc</strong></span><br>
+                    <span style="color:var(--text-dim)">🚿 ACS/Cottura: <strong>{{ b.smc_acs_cucina_stimati }} Smc</strong></span>
+                  </div>
+                {% else %}—{% endif %}
+              </td>
+              <td style="text-align:right">
+                <a href="{% url 'dettaglio_bolletta_gas' b.pk %}" class="btn ghost btn-xs">
+                  Apri Scheda
+                </a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty-state" style="padding:24px">
+        Nessuna bolletta gas presente nell'archivio.
+      </div>
+    {% endif %}
+  </div>
+
+{% if stat.disponibile %}
+<script>
+  (function() {
+    const rawData = {{ stat.chart_json|safe }};
+    if (!rawData || !rawData.labels || rawData.labels.length === 0) return;
+
+    const ctx = document.getElementById('chartNetatmo').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: rawData.labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Ore Caldaia (h/die)',
+            data: rawData.ore_caldaia,
+            backgroundColor: 'rgba(251, 146, 60, 0.65)',
+            borderColor: '#fb923c',
+            borderWidth: 1.5,
+            borderRadius: 4,
+            yAxisID: 'yOre',
+          },
+          {
+            type: 'line',
+            label: 'Temp. Interna (°C)',
+            data: rawData.temp_interna,
+            borderColor: '#38bdf8',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            tension: 0.25,
+            pointRadius: 2.5,
+            pointHoverRadius: 5,
+            yAxisID: 'yTemp',
+          },
+          {
+            type: 'line',
+            label: 'Setpoint Target (°C)',
+            data: rawData.temp_setpoint,
+            borderColor: '#4ade80',
+            borderDash: [4, 4],
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.1,
+            yAxisID: 'yTemp',
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11 } }
+          },
+          yOre: {
+            type: 'linear',
+            position: 'left',
+            title: { display: true, text: 'Ore Fiamma Caldaia (h)', color: '#fb923c' },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#fb923c' },
+            min: 0,
+          },
+          yTemp: {
+            type: 'linear',
+            position: 'right',
+            title: { display: true, text: 'Temperatura (°C)', color: '#38bdf8' },
+            grid: { drawOnChartArea: false },
+            ticks: { color: '#38bdf8' },
+            min: 14,
+            max: 24,
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { color: '#f1f5f9', font: { family: 'Plus Jakarta Sans', size: 12 } }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(11, 16, 27, 0.95)',
+            borderColor: 'rgba(255,255,255,0.1)',
+            borderWidth: 1,
+            titleColor: '#f1f5f9',
+            bodyColor: '#94a3b8',
+          }
+        }
+      }
+    });
+  })();
+</script>
+{% endif %}
+
+{% endblock %}

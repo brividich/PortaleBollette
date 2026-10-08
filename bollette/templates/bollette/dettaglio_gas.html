@@ -1,0 +1,269 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Dettaglio Bolletta Gas — {{ b.fornitore }} ({{ b.periodo_fine|date:"m/Y" }}){% endblock %}
+
+{% block content %}
+
+  <!-- Breadcrumb -->
+  <div style="margin-bottom:18px">
+    <a href="{% url 'archivio' %}" style="color:var(--accent);text-decoration:none;font-size:.86rem;display:inline-flex;align-items:center;gap:6px">
+      ← Torna all'Archivio
+    </a>
+  </div>
+
+  <!-- Hero Header -->
+  <div class="card-header" style="margin-bottom:24px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">
+        <h1 style="font-size:1.6rem;font-weight:800;margin:0;letter-spacing:-0.02em">
+          🔥 Bolletta Gas <span style="color:var(--gas)">{{ b.fornitore }}</span>
+        </h1>
+        <span class="badge gas">Gas Metano</span>
+        {% if b.ha_sync_ok %}
+          <span class="badge ok">✓ Sincronizzato con HA</span>
+        {% endif %}
+      </div>
+      <div style="color:var(--text-muted);font-size:.88rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>Periodo: <strong style="color:#f8fafc">{{ b.periodo_inizio|date:"d/m/Y" }}</strong> → <strong style="color:#f8fafc">{{ b.periodo_fine|date:"d/m/Y" }}</strong> ({{ b.giorni_periodo }} giorni)</span>
+        {% if b.pdr %}<span>· PDR: <code>{{ b.pdr }}</code></span>{% endif %}
+        {% if b.numero_fattura %}<span>· Fattura n. <code>{{ b.numero_fattura }}</code></span>{% endif %}
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <form method="post" action="{% url 'pubblica_bolletta_gas' b.pk %}" style="margin:0">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-gas" title="Invia tariffa marginale gas a Home Assistant">
+          🔥 Pubblica Prezzo Gas su HA
+        </button>
+      </form>
+      {% if b.file_bolletta %}
+        <a href="{{ b.file_bolletta.url }}" target="_blank" class="btn ghost">
+          📄 PDF Originale
+        </a>
+      {% endif %}
+      <form method="post" action="{% url 'elimina_bolletta_gas' b.pk %}" style="margin:0" onsubmit="return confirm('Sei sicuro di voler eliminare questa bolletta gas?');">
+        {% csrf_token %}
+        <button type="submit" class="btn danger">Elimina</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4 KPI Principali -->
+  <div class="grid" style="margin-bottom:26px">
+    <div class="metric" style="border-left:3px solid #38bdf8">
+      <div class="label">Importo Totale Fattura</div>
+      <div class="value">{{ b.importo_totale|default:"—" }} <small>€</small></div>
+      <div class="subtext">Spesa media: <strong>{{ b.spesa_giorno|default:"—" }} €/giorno</strong></div>
+    </div>
+    
+    <div class="metric" style="border-left:3px solid #fb923c">
+      <div class="label">Gas Fatturato</div>
+      <div class="value">{{ b.smc_fatturati }} <small>Smc</small></div>
+      <div class="subtext">Ritmo: <strong>{{ b.smc_giorno }} Smc/giorno</strong></div>
+    </div>
+    
+    <div class="metric" style="border-left:3px solid var(--gas);box-shadow:0 0 20px rgba(251, 146, 60, 0.08)">
+      <div class="label">Prezzo Marginale Reale</div>
+      <div class="value" style="color:var(--gas)">{{ b.prezzo_marginale_medio_smc }} <small>€/Smc</small></div>
+      <div class="subtext">Costo variabile al metro cubo per Home Assistant</div>
+    </div>
+    
+    <div class="metric" style="border-left:3px solid #22c55e">
+      <div class="label">Costo Finito Tutto Compreso</div>
+      <div class="value">{{ b.costo_unitario_totale|default:"—" }} <small>€/Smc</small></div>
+      <div class="subtext">Totale fattura diviso per Smc effettivi</div>
+    </div>
+  </div>
+
+  <!-- 2 Colonne: Dettaglio Tecnico e Parametri -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));margin-bottom:24px">
+    
+    <!-- Parametri e Scomposizione Gas -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header">
+        <div>
+          <h2><span>🔥</span> Componenti Tariffarie & Tecniche</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Parametri fisici e quote ARERA</span>
+        </div>
+        <span class="badge gas">Standard Metri Cubi</span>
+      </div>
+      <table>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-muted)">Componente Materia Prima Gas</td>
+            <td style="text-align:right"><strong class="price-tag">{{ b.quota_materia_prima_smc }} €/Smc</strong></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Accise e Addizionali al consumo</td>
+            <td style="text-align:right"><strong class="price-tag">{{ b.accisa_smc }} €/Smc</strong></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Quota fissa annua (QVD commercializzazione)</td>
+            <td style="text-align:right" class="price-tag">{{ b.quota_fissa_annua }} €/anno</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Coefficiente di conversione volumetrico (C)</td>
+            <td style="text-align:right"><code>{{ b.coeff_c }}</code></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Potere calorifico convenzionale (PCS)</td>
+            <td style="text-align:right"><code>{{ b.potere_calorifico_pcs }} GJ/Smc</code></td>
+          </tr>
+          <tr style="background:rgba(251, 146, 60, 0.05)">
+            <td style="font-weight:700;color:#fff">Prezzo Marginale Totale Gas</td>
+            <td style="text-align:right">
+              <strong class="price-tag" style="color:var(--gas);font-size:1.15rem">{{ b.prezzo_marginale_medio_smc }} €/Smc</strong>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      {% if b.note %}
+        <div style="margin-top:18px;padding:14px;background:rgba(255,255,255,0.03);border-radius:10px;font-size:.85rem;border:1px solid var(--card-border)">
+          <strong style="color:var(--accent)">Note:</strong> {{ b.note }}
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- Analisi Climatica Open-Meteo & Benchmark PSV -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header">
+        <div>
+          <h2><span>🌍</span> Clima & Borsa Gas (PSV)</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Dati climatici e benchmark all'ingrosso</span>
+        </div>
+        <span class="badge info">API Integrate</span>
+      </div>
+      <table>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-muted)">Temperatura media esterna nel periodo</td>
+            <td style="text-align:right">
+              {% if b.temperatura_media %}
+                <strong>{{ b.temperatura_media }} °C</strong>
+              {% else %}
+                <span style="color:var(--text-dim)">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">PSV Medio di Mercato (Punto di Scambio Virtuale)</td>
+            <td style="text-align:right">
+              {% if b.psv_medio_periodo %}
+                <strong class="price-tag">{{ b.psv_medio_periodo }} €/Smc</strong>
+              {% else %}
+                <span style="color:var(--text-dim)">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Spread Applicato dal Fornitore vs PSV</td>
+            <td style="text-align:right">
+              {% if b.spread_psv %}
+                <span class="badge {% if b.spread_psv > 0.10 %}warn{% else %}ok{% endif %} price-tag">
+                  +{{ b.spread_psv }} €/Smc
+                </span>
+              {% else %}
+                <span style="color:var(--text-dim)">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-muted)">Stato Pubblicazione su Home Assistant</td>
+            <td style="text-align:right">
+              {% if b.ha_sync_ok %}
+                <span class="badge ok">✓ Inviato ({{ b.prezzo_pubblicato_ha }} €/Smc)</span>
+              {% elif b.ha_sync_at %}
+                <span class="badge warn">Tentato</span>
+              {% else %}
+                <span style="color:var(--text-dim)">Non inviato</span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- Scheda Monitoraggio Riscaldamento Netatmo -->
+  <div class="card" style="border-left:4px solid var(--gas)">
+    <div class="card-header">
+      <div>
+        <h2><span>🔥</span> Termostato Netatmo & Rendimento Caldaia</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Correlazione ore di fiamma e metri cubi consumati</span>
+      </div>
+      {% if b.ore_caldaia %}
+        <span class="badge gas">{{ b.ore_caldaia }} ore fiamma</span>
+      {% else %}
+        <a href="{% url 'netatmo_dashboard' %}" class="btn ghost btn-xs">
+          + Carica File Netatmo
+        </a>
+      {% endif %}
+    </div>
+
+    {% if b.ore_caldaia %}
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));gap:16px;margin-bottom:18px">
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border:1px solid var(--card-border)">
+          <div style="font-size:.74rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Ore Totali Caldaia</div>
+          <div style="font-size:1.45rem;font-weight:800;color:var(--gas);font-family:var(--font-display)">{{ b.ore_caldaia }} <small style="font-size:.8rem;color:var(--text-muted)">ore</small></div>
+          <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">Nel periodo di fatturazione</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border:1px solid var(--card-border)">
+          <div style="font-size:.74rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Consumo Orario Caldaia</div>
+          <div style="font-size:1.45rem;font-weight:800;color:var(--accent);font-family:var(--font-display)">{{ b.smc_ora_caldaia|default:"—" }} <small style="font-size:.8rem;color:var(--text-muted)">Smc/h</small></div>
+          <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">Metri cubi per ora di fiamma attiva</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border:1px solid var(--card-border)">
+          <div style="font-size:.74rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Costo Orario Riscaldamento</div>
+          <div style="font-size:1.45rem;font-weight:800;color:var(--ok);font-family:var(--font-display)">{{ b.costo_ora_caldaia|default:"—" }} <small style="font-size:.8rem;color:var(--text-muted)">€/h</small></div>
+          <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">Spesa per ogni ora di accensione</div>
+        </div>
+        
+        <div style="background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;border:1px solid var(--card-border)">
+          <div style="font-size:.74rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Temp. Interna Media</div>
+          <div style="font-size:1.45rem;font-weight:800;color:#f8fafc;font-family:var(--font-display)">{{ b.temp_interna_media|default:"—" }} <small style="font-size:.8rem;color:var(--text-muted)">°C</small></div>
+          <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">Sonda ambiente Netatmo</div>
+        </div>
+      </div>
+
+      <!-- Scomposizione Riscaldamento vs ACS/Cucina -->
+      {% if b.smc_riscaldamento_stimati %}
+      <div style="background:rgba(255,255,255,0.02);padding:16px 20px;border-radius:12px;border:1px solid var(--card-border)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <strong style="font-size:.92rem;color:#f8fafc">Scomposizione Stimata Consumo Gas</strong>
+          <span style="font-size:.82rem;color:var(--text-muted)">Totale: <strong style="color:#fff">{{ b.smc_fatturati }} Smc</strong></span>
+        </div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:.88rem">
+          <div>
+            <span style="color:var(--gas)">🔥 Riscaldamento Termico:</span>
+            <strong style="color:#f8fafc;margin-left:4px">{{ b.smc_riscaldamento_stimati }} Smc</strong>
+          </div>
+          <div>
+            <span style="color:var(--text-muted)">🚿 Acqua Calda Sanitaria (ACS) & Cucina:</span>
+            <strong style="color:#f8fafc;margin-left:4px">{{ b.smc_acs_cucina_stimati }} Smc</strong>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    {% else %}
+      <div class="empty-state" style="padding:28px 16px">
+        <div style="font-size:2rem;margin-bottom:8px">🌡️</div>
+        <span style="color:var(--text-muted);font-size:.88rem">
+          Nessun dato di riscaldamento Netatmo associato a questo periodo.<br>
+          Carica il file storico scaricato da Netatmo Energy WebApp per abilitare l'audit termico.
+        </span>
+        <div style="margin-top:14px">
+          <a href="{% url 'netatmo_dashboard' %}" class="btn ghost btn-xs">
+            Vai al Modulo Netatmo &rarr;
+          </a>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+{% endblock %}

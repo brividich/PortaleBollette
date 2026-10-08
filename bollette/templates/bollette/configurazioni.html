@@ -1,0 +1,2046 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Centro di Controllo & Configurazioni — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <!-- 1. HEADER CENTRO DI CONTROLLO -->
+  <div class="card-header config-top-header" style="margin-bottom: 20px;">
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <div class="config-main-icon">⚙️</div>
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <h1 style="font-size: 1.65rem; font-weight: 700; margin: 0; letter-spacing: -0.02em;">Centro di Controllo & Configurazioni</h1>
+          <span id="globalHealthBadge" class="badge {% if ha_configured and meteo_configured %}ok{% else %}warn{% endif %}">
+            {% if ha_configured and meteo_configured %}🟢 Sistema Pronto{% else %}⚠️ Configurazione Incompleta{% endif %}
+          </span>
+        </div>
+        <span style="color: var(--muted); font-size: .88rem; display: block; margin-top: 4px;">
+          Pannello unificato di integrazione: domotica Home Assistant (Pull & Push), normalizzazione climatica Open-Meteo e Netatmo Cloud.
+        </span>
+      </div>
+    </div>
+
+    <!-- Azioni Rapide Testata -->
+    <div class="top-actions-bar">
+      <button type="button" class="btn ghost btn-sm" id="btnTestAll" onclick="testTuttiIServizi()" title="Esegui test diagnostico simultaneo sui 3 servizi esterni">
+        ⚡ Diagnostica Completa
+      </button>
+      <a href="/admin/bollette/configurazionesistema/" class="btn ghost btn-sm" title="Pannello Django Admin">
+        🛠️ Django Admin
+      </a>
+      <button type="button" class="btn btn-save-accent" onclick="inviaFormConfig()">
+        💾 Salva Modifiche
+      </button>
+    </div>
+  </div>
+
+  <!-- 2. MONITOR LIVE DEI 3 SERVIZI (GRID 3 PILASTRI) -->
+  <div class="status-grid-3" style="margin-bottom: 22px;">
+    <!-- Pilastro 1: Home Assistant -->
+    <div class="card status-card">
+      <div class="status-card-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="icon-circle ha-circle">🌐</div>
+          <div>
+            <h3 class="card-title-sm">Home Assistant</h3>
+            <span class="card-sub-sm">Bridge REST & Helper</span>
+          </div>
+        </div>
+        <span id="haLiveBadge" class="badge {% if ha_configured %}ok{% else %}warn{% endif %}">
+          {% if ha_configured %}🟢 Configurato{% else %}⚠️ Da Configurare{% endif %}
+        </span>
+      </div>
+      <div class="status-meta">
+        <div class="meta-row">
+          <span class="meta-label">URL Base:</span>
+          <span class="meta-val font-mono" id="haLiveUrlDisplay">{{ cfg.ha_base_url|default:"Non impostato"|truncatechars:26 }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Token REST:</span>
+          <span class="meta-val">{% if cfg.ha_token %}•••••••• (Attivo){% else %}<strong style="color:var(--warn)">Mancante</strong>{% endif %}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Strategia Prezzo:</span>
+          <span class="meta-val">{{ cfg.get_prezzo_ha_mode_display|truncatechars:24 }}</span>
+        </div>
+      </div>
+      <div style="margin-top: 12px; display: flex; gap: 8px;">
+        <button type="button" class="btn ghost w-100 btn-xs" onclick="testServizioSingolo('ha')">
+          🔌 Verifica Connessione HA
+        </button>
+      </div>
+    </div>
+
+    <!-- Pilastro 2: Open-Meteo -->
+    <div class="card status-card">
+      <div class="status-card-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="icon-circle meteo-circle">☀️</div>
+          <div>
+            <h3 class="card-title-sm">Open-Meteo API</h3>
+            <span class="card-sub-sm">Normalizzazione HDD</span>
+          </div>
+        </div>
+        <span id="meteoLiveBadge" class="badge ok">🟢 Gratuito (No-Key)</span>
+      </div>
+      <div class="status-meta">
+        <div class="meta-row">
+          <span class="meta-label">Località:</span>
+          <span class="meta-val font-mono" id="meteoLiveCittaDisplay">{{ cfg.meteo_citta }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Coordinate:</span>
+          <span class="meta-val font-mono">{{ cfg.meteo_latitude }}, {{ cfg.meteo_longitude }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Modello Termico:</span>
+          <span class="meta-val">PRISM Gradi Giorno (18°C)</span>
+        </div>
+      </div>
+      <div style="margin-top: 12px; display: flex; gap: 8px;">
+        <button type="button" class="btn ghost w-100 btn-xs" onclick="testServizioSingolo('meteo')">
+          ☀️ Verifica Stazione Clima
+        </button>
+      </div>
+    </div>
+
+    <!-- Pilastro 3: Netatmo Cloud -->
+    <div class="card status-card">
+      <div class="status-card-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="icon-circle netatmo-circle">🔥</div>
+          <div>
+            <h3 class="card-title-sm">Netatmo Cloud</h3>
+            <span class="card-sub-sm">Smart Thermostat API</span>
+          </div>
+        </div>
+        <span id="netatmoLiveBadge" class="badge {% if netatmo_configured %}ok{% else %}off{% endif %}">
+          {% if netatmo_configured %}🟢 Collegato{% else %}⚪ Da Configurare{% endif %}
+        </span>
+      </div>
+      <div class="status-meta">
+        <div class="meta-row">
+          <span class="meta-label">Client ID:</span>
+          <span class="meta-val font-mono">{% if cfg.netatmo_client_id %}{{ cfg.netatmo_client_id|truncatechars:20 }}{% else %}Non impostato{% endif %}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">OAuth2 Refresh:</span>
+          <span class="meta-val">{% if cfg.netatmo_refresh_token %}•••••••• (Presente){% else %}<span style="color:var(--muted)">Assente</span>{% endif %}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Dispositivo:</span>
+          <span class="meta-val font-mono">{{ cfg.netatmo_home_id|default:"Rilevamento auto"|truncatechars:22 }}</span>
+        </div>
+      </div>
+      <div style="margin-top: 12px; display: flex; gap: 8px;">
+        <button type="button" class="btn ghost w-100 btn-xs" onclick="testServizioSingolo('netatmo')">
+          🔥 Verifica Cloud Netatmo
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. BOX FEEDBACK DIAGNOSTICA GLOBALE -->
+  <div id="diagnosticaGlobalFeedback" style="display: none; padding: 14px 18px; border-radius: 14px; margin-bottom: 22px; animation: fadeIn .3s ease;"></div>
+
+  <!-- 4. STICKY SUB-NAVBAR CON SCHEDE DI SEZIONE (FRUIBILITÀ MASSIMA) -->
+  <div class="sticky-subnav-container" id="subnavContainer">
+    <div class="subnav-tabs-wrapper">
+      <button type="button" class="subnav-tab active" data-tab="sezioneHA" onclick="cambiaTab('sezioneHA')">
+        <span class="tab-icon">🌐</span>
+        <span class="tab-text">1. Home Assistant</span>
+        <span class="tab-dot {% if ha_configured %}dot-ok{% else %}dot-warn{% endif %}"></span>
+      </button>
+
+      <button type="button" class="subnav-tab" data-tab="sezioneSensori" onclick="cambiaTab('sezioneSensori')">
+        <span class="tab-icon">⚡</span>
+        <span class="tab-text">2. Sensori & Aiutanti</span>
+        <span class="tab-dot {% if cfg.ha_entity_kwh_consumo or cfg.ha_entity_smc_consumo %}dot-ok{% else %}dot-off{% endif %}"></span>
+      </button>
+
+      <button type="button" class="subnav-tab" data-tab="sezioneMeteo" onclick="cambiaTab('sezioneMeteo')">
+        <span class="tab-icon">☀️</span>
+        <span class="tab-text">3. Clima & Gradi Giorno</span>
+        <span class="tab-dot dot-ok"></span>
+      </button>
+
+      <button type="button" class="subnav-tab" data-tab="sezioneNetatmo" onclick="cambiaTab('sezioneNetatmo')">
+        <span class="tab-icon">🔥</span>
+        <span class="tab-text">4. Netatmo Cloud</span>
+        <span class="tab-dot {% if netatmo_configured %}dot-ok{% else %}dot-off{% endif %}"></span>
+      </button>
+
+      {% if ha_logs %}
+      <button type="button" class="subnav-tab" data-tab="sezioneLogs" onclick="cambiaTab('sezioneLogs')">
+        <span class="tab-icon">📋</span>
+        <span class="tab-text">5. Registro Sync</span>
+        <span class="tab-count-badge">{{ tot_sync }}</span>
+      </button>
+      {% endif %}
+
+      <button type="button" class="subnav-tab tab-show-all" data-tab="all" onclick="cambiaTab('all')" title="Mostra tutte le sezioni insieme per visualizzazione completa">
+        <span class="tab-icon">📄</span>
+        <span class="tab-text">Mostra Tutto</span>
+      </button>
+    </div>
+  </div>
+
+
+  <!-- 5. FORM DI CONFIGURAZIONE COMPLETO -->
+  <form id="configForm" method="post" action="{% url 'configurazioni' %}">
+    {% csrf_token %}
+
+    <!-- ===================================================================
+         SEZIONE 1: HOME ASSISTANT (CON DUAL MODE PULL vs PUSH)
+         =================================================================== -->
+    <div class="card config-section-card tab-content-block" id="sezioneHA">
+      <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="section-icon ha-icon">🌐</span>
+          <div>
+            <h2 class="section-title">1. Integrazione Home Assistant</h2>
+            <span class="section-desc">Collegamento bidirezionale per lettura contatori hardware e pubblicazione tariffe reali calcolate.</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="btn ghost btn-sm" onclick="toggleGuidaRapida()">
+            <span id="labelGuidaToggle">📘 Mostra Guida Passo-Passo ▼</span>
+          </button>
+          <button type="button" class="btn ghost btn-sm" onclick="testServizioSingolo('ha')">
+            🔌 Esegui Test Adesso
+          </button>
+        </div>
+      </div>
+
+      <!-- SELETTORE DUAL MODE: REST PULL (Locale) vs WEBHOOK PUSH (Cloud) -->
+      <div class="dual-mode-container" style="margin-bottom: 20px;">
+        <div class="dual-mode-header">
+          <span style="font-size: .84rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">
+            Modalità di Comunicazione con Home Assistant
+          </span>
+          <span class="badge info" style="font-size: .72rem;">Dual-Mode Cloud/LAN Ready</span>
+        </div>
+        <div class="dual-mode-selector">
+          <div class="mode-card active" id="modeCardPull" onclick="selezionaModalitaHA('pull')">
+            <div class="mode-card-radio"></div>
+            <div>
+              <div class="mode-title">
+                <span>🔄 REST Polling (PULL Locale)</span>
+                <span class="badge ok" style="font-size:.68rem;">Consigliato per LAN</span>
+              </div>
+              <p class="mode-desc">
+                Il Portale Bollette contatta direttamente l'API di Home Assistant tramite indirizzo IP locale e Token. Ideale quando portale e domotica sono sulla stessa rete locale.
+              </p>
+            </div>
+          </div>
+
+          <div class="mode-card" id="modeCardPush" onclick="selezionaModalitaHA('push')">
+            <div class="mode-card-radio"></div>
+            <div>
+              <div class="mode-title">
+                <span>🚀 Cloud Webhook (PUSH Remoto)</span>
+                <span class="badge electric" style="font-size:.68rem;">Ideale per VPS & Cloud</span>
+              </div>
+              <p class="mode-desc">
+                Home Assistant invia i consumi al Portale Bollette via automazione e riceve in risposta le tariffe aggiornate. Non richiede IP pubblico o porte aperte su HA.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GUIDA PASSO-PASSO COLLASSABILE -->
+      <div id="boxGuidaPassoPasso" class="guide-accordion-box" style="display: none;">
+        <div class="guide-steps-grid">
+          <div class="guide-step-card">
+            <div class="step-header">
+              <span class="step-num">1</span>
+              <h4>Indirizzo di Rete (URL Base)</h4>
+            </div>
+            <p class="step-text">
+              Inserisci l'indirizzo con cui accedi a Home Assistant dal tuo browser.
+            </p>
+            <div class="step-preset-box">
+              <small style="color: var(--muted); display: block; margin-bottom: 6px;">💡 Inserisci rapido con 1 clic:</small>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button type="button" class="preset-pill" onclick="applicaUrlBase('http://homeassistant.local:8123')">homeassistant.local:8123</button>
+                <button type="button" class="preset-pill" onclick="applicaUrlBase('http://192.168.1.100:8123')">192.168.1.100:8123</button>
+                <button type="button" class="preset-pill" onclick="applicaUrlBase('http://192.168.1.200:8123')">192.168.1.200:8123</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="guide-step-card">
+            <div class="step-header">
+              <span class="step-num">2</span>
+              <h4>Genera il Token (30 secondi)</h4>
+            </div>
+            <p class="step-text">
+              In HA clicca sul tuo <strong>Profilo</strong> (in basso a sinistra) &rarr; <strong>Sicurezza</strong> &rarr; scorri in fondo su <em>"Token di accesso a lungo termine"</em> &rarr; <strong>Crea token</strong>, copialo e incollalo nel campo sotto.
+            </p>
+          </div>
+
+          <div class="guide-step-card">
+            <div class="step-header">
+              <span class="step-num">3</span>
+              <h4>Crea gli Helper in HA</h4>
+            </div>
+            <p class="step-text">
+              Il portale scriverà i costi negli Aiutanti <code>input_number</code> per alimentare la Dashboard Energia di HA.
+            </p>
+            <button type="button" class="btn ghost btn-xs w-100" onclick="copiaYamlHelper()" style="margin-top: 6px;">
+              📋 Copia Snippet configuration.yaml
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SNIPPET YAML HELPER NASCOSTO MA COPIABILE -->
+      <pre id="yamlHelperSnippet" style="display: none;">input_number:
+  prezzo_energia_kwh:
+    name: Prezzo Energia Luce Reale
+    min: 0.0001
+    max: 2.0000
+    step: 0.0001
+    unit_of_measurement: "EUR/kWh"
+  prezzo_gas_smc:
+    name: Prezzo Gas Metano Reale
+    min: 0.0001
+    max: 5.0000
+    step: 0.0001
+    unit_of_measurement: "EUR/m³"</pre>
+
+      <!-- PANNELLO MODALITÀ A: REST PULL (FORM NATIVO) -->
+      <div id="panelModePull">
+        <div class="form-grid">
+          <!-- URL Base -->
+          <div class="field full-width">
+            <label for="id_ha_base_url">
+              <span>Indirizzo URL Base Home Assistant</span>
+              <span class="required-indicator">*</span>
+            </label>
+            <div class="input-with-action">
+              {{ form.ha_base_url }}
+              <button type="button" class="input-action-btn" title="Inserisci default locale" onclick="applicaUrlBase('http://homeassistant.local:8123')">
+                🏠 Default
+              </button>
+            </div>
+            <small class="help">
+              Indirizzo HTTP o HTTPS completo (senza slash finale). Es. <code>http://homeassistant.local:8123</code> oppure <code>http://192.168.1.150:8123</code>.
+            </small>
+          </div>
+
+          <!-- Token Long-Lived -->
+          <div class="field full-width">
+            <label for="id_ha_token">
+              <span>Long-Lived Access Token (Token Segreto a Lungo Termine)</span>
+              <span class="required-indicator">*</span>
+            </label>
+            <div class="input-with-action">
+              {{ form.ha_token }}
+              <button type="button" class="input-action-btn" id="btnToggleToken" title="Mostra o nascondi token" onclick="toggleTokenVisibility('id_ha_token', 'btnToggleToken')">
+                👁️ Mostra
+              </button>
+              <button type="button" class="input-action-btn" title="Incolla dagli appunti" onclick="incollaToken('id_ha_token')">
+                📋 Incolla
+              </button>
+            </div>
+            <small class="help">
+              Generato dal tuo profilo utente in Home Assistant. Memorizzato in sicurezza nel database SQLite protetto.
+            </small>
+          </div>
+
+          <!-- Modalità Prezzo -->
+          <div class="field">
+            <label for="id_prezzo_ha_mode">
+              <span>Strategia di Calcolo Prezzo</span>
+            </label>
+            {{ form.prezzo_ha_mode }}
+            <small class="help">
+              <strong>Consigliato:</strong> Media mobile 12 mesi pesata per evitare oscillazioni drastiche nei calcoli dei consumi giornalieri.
+            </small>
+          </div>
+
+          <!-- Path CA Bundle -->
+          <div class="field">
+            <label for="id_ha_ca_bundle">
+              <span>Certificato CA Personalizzato (Opzionale)</span>
+            </label>
+            {{ form.ha_ca_bundle }}
+            <small class="help">
+              Lascia vuoto se usi HTTP o certificati attendibili (Let's Encrypt). Usalo solo per CA autofirmata locale.
+            </small>
+          </div>
+
+          <!-- Toggle Switch TLS Verify -->
+          <div class="field switch-field">
+            <label class="switch-container">
+              {{ form.ha_tls_verify }}
+              <span class="switch-slider"></span>
+            </label>
+            <div class="switch-text">
+              <strong>Verifica Certificato SSL/TLS</strong>
+              <small style="display: block; color: var(--muted); font-size: .78rem;">
+                Disabilita se ti connetti via IP locale con certificato autofirmato per evitare errori di handshake.
+              </small>
+            </div>
+          </div>
+
+          <!-- Toggle Switch Sync Auto -->
+          <div class="field switch-field">
+            <label class="switch-container">
+              {{ form.ha_sync_auto }}
+              <span class="switch-slider"></span>
+            </label>
+            <div class="switch-text">
+              <strong>Sincronizzazione Automatica</strong>
+              <small style="display: block; color: var(--muted); font-size: .78rem;">
+                Invia immediatamente il prezzo aggiornato a Home Assistant ogni volta che viene archiviata una nuova bolletta.
+              </small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANNELLO MODALITÀ B: CLOUD WEBHOOK PUSH -->
+      <div id="panelModePush" style="display: none;">
+        <div class="push-guide-box">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h4 style="margin: 0; font-size: 1rem; color: #38bdf8;">📡 Endpoint Webhook Cloud per Home Assistant</h4>
+              <span style="font-size: .8rem; color: var(--muted);">Configura questa automazione in Home Assistant per inviare dati al Portale e ricevere i prezzi.</span>
+            </div>
+            <button type="button" class="btn ghost btn-sm" onclick="copiaTesto('{{ webhook_url }}', 'URL Webhook copiato!')">
+              📋 Copia URL Webhook
+            </button>
+          </div>
+
+          <div style="background: rgba(0,0,0,0.4); padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); margin-bottom: 14px;">
+            <span style="font-size: .76rem; color: var(--muted); display: block; margin-bottom: 4px;">URL ENDPOINT ASSEGNATO:</span>
+            <code class="font-mono" style="color: #7dd3fc; font-size: .88rem; word-break: break-all;">{{ webhook_url }}</code>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: .8rem; font-weight: 700; color: #cbd5e1;">Codice Automazione HA pronto (automations.yaml):</span>
+            <button type="button" class="preset-pill" onclick="copiaAutomazionePushYaml()">📋 Copia YAML Automazione</button>
+          </div>
+          <pre id="automationPushSnippet" class="code-box-yaml font-mono">automation:
+  - alias: "Sincronizza Portale Bollette"
+    trigger:
+      - platform: time_pattern
+        hours: "/1"  # Ogni ora
+    action:
+      - service: rest_command.send_to_portale_bollette
+        data: {}
+
+# In configuration.yaml:
+rest_command:
+  send_to_portale_bollette:
+    url: "{{ webhook_url }}"
+    method: POST
+    content_type: "application/json"
+    payload: >-
+      {
+        "temperatura_interna": {% templatetag openvariable %} states('sensor.temperatura_salone') {% templatetag closevariable %},
+        "caldaia_accesa": {% templatetag openvariable %} is_state('binary_sensor.stato_caldaia', 'on') {% templatetag closevariable %}
+      }</pre>
+        </div>
+      </div>
+
+      <!-- Risultato Test HA Locale -->
+      <div id="haTestFeedback" style="display: none; margin-top: 16px; padding: 12px 16px; border-radius: 12px; font-size: .88rem;"></div>
+    </div>
+
+
+    <!-- ===================================================================
+         SEZIONE 2: SENSORI DI MISURA & ENTITÀ AIUTANTE (CON SMART DISCOVERY)
+         =================================================================== -->
+    <div class="card config-section-card tab-content-block" id="sezioneSensori">
+      <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="section-icon energy-icon">⚡</span>
+          <div>
+            <h2 class="section-title">2. Sensori di Misura & Entità Aiutante (Helper)</h2>
+            <span class="section-desc">Associa i tuoi sensori hardware reali e specifica in quali helper scrivere i prezzi marginali.</span>
+          </div>
+        </div>
+        <button type="button" class="btn ghost btn-sm" onclick="apriSelettoreSensori('id_ha_entity_kwh_consumo', 'energy')">
+          🔍 Esplora Tutti i Sensori HA
+        </button>
+      </div>
+
+      <!-- SMART DISCOVERY BAR (RILEVAMENTO CON 1 CLIC) -->
+      <div class="smart-discovery-bar">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.1rem;">🪄</span>
+          <span style="font-size: .84rem; font-weight: 600; color: #cbd5e1;">Rilevamento Intelligente Sensori:</span>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="preset-pill active" onclick="autoRilevaSensore('energy')" id="btnAutoDetectLuce">
+            🪄 Auto-Rileva Sensore Luce (kWh)
+          </button>
+          <button type="button" class="preset-pill active" onclick="autoRilevaSensore('gas')" id="btnAutoDetectGas">
+            🪄 Auto-Rileva Sensore Gas (Smc)
+          </button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <!-- Sensore Consumi Luce -->
+        <div class="field">
+          <label for="id_ha_entity_kwh_consumo">
+            <span>Sensore Consumo Elettrico Reale (kWh)</span>
+          </label>
+          <div class="input-with-action">
+            {{ form.ha_entity_kwh_consumo }}
+            <button type="button" class="input-action-btn" title="Scegli sensore da Home Assistant" onclick="apriSelettoreSensori('id_ha_entity_kwh_consumo', 'energy')">
+              🔍 Scegli
+            </button>
+          </div>
+          <small class="help">
+            Sensore cumulativo del contatore/Shelly (es. <code>sensor.shelly_em_channel_1_energy</code>) per validare i kWh fatturati.
+          </small>
+        </div>
+
+        <!-- Sensore Consumi Gas -->
+        <div class="field">
+          <label for="id_ha_entity_smc_consumo">
+            <span>Sensore Consumo Gas Reale (Smc o m³)</span>
+          </label>
+          <div class="input-with-action">
+            {{ form.ha_entity_smc_consumo }}
+            <button type="button" class="input-action-btn" title="Scegli sensore gas da Home Assistant" onclick="apriSelettoreSensori('id_ha_entity_smc_consumo', 'gas')">
+              🔍 Scegli
+            </button>
+          </div>
+          <small class="help">
+            Sensore volumetrico contatore gas per confrontare il consumo effettivo della caldaia.
+          </small>
+        </div>
+
+        <!-- Helper Prezzo Luce -->
+        <div class="field">
+          <label for="id_ha_entity_prezzo_singolo">
+            <span>Helper Prezzo Luce (€/kWh)</span>
+          </label>
+          <div class="input-with-action">
+            {{ form.ha_entity_prezzo_singolo }}
+            <button type="button" class="input-action-btn" title="Reimposta default" onclick="document.getElementById('id_ha_entity_prezzo_singolo').value = 'input_number.prezzo_energia_kwh'">
+              ↩️ Default
+            </button>
+          </div>
+          <small class="help">
+            Entità <code>input_number</code> in cui il portale pubblicherà il prezzo luce (default: <code>input_number.prezzo_energia_kwh</code>).
+          </small>
+        </div>
+
+        <!-- Helper Prezzo Gas -->
+        <div class="field">
+          <label for="id_ha_entity_prezzo_gas">
+            <span>Helper Prezzo Gas (€/Smc)</span>
+          </label>
+          <div class="input-with-action">
+            {{ form.ha_entity_prezzo_gas }}
+            <button type="button" class="input-action-btn" title="Reimposta default" onclick="document.getElementById('id_ha_entity_prezzo_gas').value = 'input_number.prezzo_gas_smc'">
+              ↩️ Default
+            </button>
+          </div>
+          <small class="help">
+            Entità <code>input_number</code> in cui pubblicare il costo gas (default: <code>input_number.prezzo_gas_smc</code>).
+          </small>
+        </div>
+
+        <!-- Sensore PUN -->
+        <div class="field full-width">
+          <label for="id_ha_entity_pun">
+            <span>Sensore Indice PUN in Home Assistant (Opzionale)</span>
+          </label>
+          <div class="input-with-action">
+            {{ form.ha_entity_pun }}
+            <button type="button" class="input-action-btn" title="Scegli sensore da Home Assistant" onclick="apriSelettoreSensori('id_ha_entity_pun', 'pun')">
+              🔍 Scegli
+            </button>
+          </div>
+          <small class="help">
+            Sensore con il Prezzo Unico Nazionale (es. integrazione <em>pun_sensor</em>), default <code>sensor.pun_mono</code>.
+          </small>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ===================================================================
+         SEZIONE 3: PARAMETRI CLIMATICI & OPEN-METEO
+         =================================================================== -->
+    <div class="card config-section-card tab-content-block" id="sezioneMeteo">
+      <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="section-icon meteo-icon">☀️</span>
+          <div>
+            <h2 class="section-title">3. Parametri Climatici (Open-Meteo & Gradi Giorno HDD)</h2>
+            <span class="section-desc">Calcolo scientifico del fabbisogno termico invernale e normalizzazione dei consumi di riscaldamento.</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn ghost btn-sm" onclick="rilevaPosizioneBrowser()">
+            📍 Usa Posizione GPS Browser
+          </button>
+          <button type="button" class="btn ghost btn-sm" onclick="testServizioSingolo('meteo')">
+            ☀️ Verifica Clima Live
+          </button>
+        </div>
+      </div>
+
+      <!-- Preset Città Rapide con 1 Clic -->
+      <div class="city-presets-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <small style="color: var(--muted); font-weight: 600;">
+            📍 Scegli la tua città per impostare coordinate esatte all'istante:
+          </small>
+        </div>
+        <div class="city-pills-wrap">
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Roma', '41.9028', '12.4964')">🏛️ Roma</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Milano', '45.4642', '9.1900')">🏙️ Milano</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Napoli', '40.8518', '14.2681')">🍕 Napoli</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Torino', '45.0703', '7.6869')">🏎️ Torino</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Bologna', '44.4949', '11.3426')">🍝 Bologna</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Firenze', '43.7696', '11.2558')">⚜️ Firenze</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Palermo', '38.1157', '13.3615')">🌊 Palermo</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Genova', '44.4056', '8.9463')">🚢 Genova</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Venezia', '45.4408', '12.3155')">🎭 Venezia</button>
+          <button type="button" class="preset-pill city" onclick="applicaCitta('Bari', '41.1171', '16.8719')">☀️ Bari</button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="id_meteo_citta">Località di Riferimento</label>
+          {{ form.meteo_citta }}
+          <small class="help">Nome della città o comune di ubicazione dell'immobile.</small>
+        </div>
+        <div class="field">
+          <label for="id_meteo_latitude">Latitudine Geografica</label>
+          {{ form.meteo_latitude }}
+          <small class="help">Formato decimale (es. 41.9028).</small>
+        </div>
+        <div class="field">
+          <label for="id_meteo_longitude">Longitudine Geografica</label>
+          {{ form.meteo_longitude }}
+          <small class="help">Formato decimale (es. 12.4964).</small>
+        </div>
+      </div>
+
+      <!-- Risultato Test Meteo Locale -->
+      <div id="meteoTestFeedback" style="display: none; margin-top: 16px; padding: 12px 16px; border-radius: 12px; font-size: .88rem;"></div>
+    </div>
+
+
+    <!-- ===================================================================
+         SEZIONE 4: NETATMO CONNECT CLOUD API
+         =================================================================== -->
+    <div class="card config-section-card tab-content-block" id="sezioneNetatmo">
+      <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="section-icon netatmo-icon">🔥</span>
+          <div>
+            <h2 class="section-title">4. Netatmo Connect Cloud API (Termostato Smart)</h2>
+            <span class="section-desc">Connessione diretta Cloud per acquisire ore di accensione caldaia e temperature senza dover esportare file CSV.</span>
+          </div>
+        </div>
+        <button type="button" class="btn ghost btn-sm" onclick="testServizioSingolo('netatmo')">
+          🔥 Test Connessione Netatmo
+        </button>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="id_netatmo_client_id">Netatmo Client ID</label>
+          {{ form.netatmo_client_id }}
+          <small class="help">Creato gratuitamente registrando un'applicazione su <a href="https://dev.netatmo.com/apps" target="_blank" rel="noopener" style="color:var(--accent)">dev.netatmo.com/apps</a>.</small>
+        </div>
+
+        <div class="field">
+          <label for="id_netatmo_client_secret">Netatmo Client Secret</label>
+          <div class="input-with-action">
+            {{ form.netatmo_client_secret }}
+            <button type="button" class="input-action-btn" id="btnToggleSecret" title="Mostra/Nascondi segreto" onclick="toggleTokenVisibility('id_netatmo_client_secret', 'btnToggleSecret')">
+              👁️ Mostra
+            </button>
+          </div>
+          <small class="help">Segreto API generato nel portale sviluppatori Netatmo.</small>
+        </div>
+
+        <div class="field full-width">
+          <label for="id_netatmo_refresh_token">Netatmo Refresh Token (OAuth2)</label>
+          <div class="input-with-action">
+            {{ form.netatmo_refresh_token }}
+            <button type="button" class="input-action-btn" id="btnToggleRefTok" title="Mostra/Nascondi token" onclick="toggleTokenVisibility('id_netatmo_refresh_token', 'btnToggleRefTok')">
+              👁️ Mostra
+            </button>
+            <button type="button" class="input-action-btn" title="Incolla dagli appunti" onclick="incollaToken('id_netatmo_refresh_token')">
+              📋 Incolla
+            </button>
+          </div>
+          <small class="help">
+            Generato dal <strong>Token Generator</strong> su <a href="https://dev.netatmo.com" target="_blank" rel="noopener" style="color:var(--accent)">dev.netatmo.com</a> con scope <code>read_thermostat</code>. Il portale gestirà poi il rinnovo continuo in automatico.
+          </small>
+        </div>
+      </div>
+
+      <div id="netatmoTestFeedback" style="display: none; margin-top: 16px; padding: 12px 16px; border-radius: 12px; font-size: .88rem;"></div>
+    </div>
+
+
+    <!-- ===================================================================
+         SEZIONE 5: REGISTRO SINCRONIZZAZIONI HA
+         =================================================================== -->
+    {% if ha_logs %}
+    <div class="card config-section-card tab-content-block" id="sezioneLogs">
+      <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="section-icon logs-icon">📋</span>
+          <div>
+            <h2 class="section-title">5. Registro Recente Sincronizzazioni verso Home Assistant</h2>
+            <span class="section-desc">Ultime scritture effettuate sugli helper di Home Assistant (Totale sincronizzazioni: {{ tot_sync }}).</span>
+          </div>
+        </div>
+      </div>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%;">
+          <thead>
+            <tr>
+              <th>Data & Ora</th>
+              <th>Tipo</th>
+              <th>Entità Scritta</th>
+              <th>Valore (€)</th>
+              <th>Modalità</th>
+              <th>Stato Esito</th>
+              <th>Dettaglio Risposta</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in ha_logs %}
+              <tr>
+                <td style="font-size: .82rem; color: var(--muted); white-space: nowrap;">{{ log.creato_il|date:"d/m/Y H:i:s" }}</td>
+                <td>
+                  {% if log.bolletta %}
+                    <span class="badge electric">⚡ Luce</span>
+                  {% elif log.bolletta_gas %}
+                    <span class="badge gas">🔥 Gas</span>
+                  {% else %}
+                    <span class="badge info">Bridge</span>
+                  {% endif %}
+                </td>
+                <td><code style="color:#7dd3fc; font-size:.82rem;">{{ log.entity_id|default:"—" }}</code></td>
+                <td><strong>{{ log.valore|default:"—" }}</strong></td>
+                <td><small style="color: var(--muted);">{{ log.get_modalita_display }}</small></td>
+                <td>
+                  {% if log.esito %}
+                    <span class="badge ok">🟢 OK</span>
+                  {% else %}
+                    <span class="badge off">🔴 Fallito</span>
+                  {% endif %}
+                </td>
+                <td style="font-size: .8rem; color: var(--muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ log.dettaglio_errore }}">
+                  {{ log.dettaglio_errore|default:"Scrittura completata con successo" }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+
+    <!-- ===================================================================
+         STICKY BOTTOM SAVE BAR CON RILEVAMENTO MODIFICHE PENDENTI
+         =================================================================== -->
+    <div class="sticky-save-dock" id="stickySaveDock">
+      <div class="save-dock-inner">
+        <div class="save-dock-info">
+          <div class="dock-status-indicator" id="dockDirtyIndicator"></div>
+          <div>
+            <span class="dock-title" id="dockStatusTitle">Configurazioni Pronte</span>
+            <small class="dock-subtitle" id="dockStatusSubtitle">Nessuna modifica non salvata.</small>
+          </div>
+        </div>
+        <div class="save-dock-actions">
+          <button type="button" class="btn ghost btn-sm" onclick="ripristinaForm()">
+            ↩️ Annulla
+          </button>
+          <button type="submit" class="btn btn-save-accent" id="btnSubmitForm">
+            💾 Salva Tutte le Configurazioni
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </form>
+
+
+  <!-- ===================================================================
+       MODAL SELETTORE SENSORI INTERATTIVO
+       =================================================================== -->
+  <div id="sensorPickerModal" class="modal-backdrop">
+    <div class="modal" style="max-width: 860px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.4rem;">🔍</span>
+          <div>
+            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">Seleziona Sensore da Home Assistant</h3>
+            <span style="color: var(--muted); font-size: .82rem;">Clicca su "Usa Questo" per associare il sensore al campo selezionato.</span>
+          </div>
+        </div>
+        <button type="button" class="btn ghost" style="padding: 4px 10px; font-size: 1.1rem;" onclick="chiudiSelettoreSensori()">✕</button>
+      </div>
+
+      <!-- Barra Ricerca & Filtri Categoria -->
+      <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
+        <input type="text" id="sensorSearchInput" placeholder="🔎 Cerca per nome sensore o entity_id..." oninput="filtraTabellaSensori()" style="flex: 1; background: rgba(0,0,0,0.4); border: 1px solid var(--card-border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: .88rem;">
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="preset-pill active" id="btnFilterAll" onclick="impostaFiltroCategoria('all')">Tutti</button>
+          <button type="button" class="preset-pill" id="btnFilterEnergy" onclick="impostaFiltroCategoria('energy')">⚡ Luce</button>
+          <button type="button" class="preset-pill" id="btnFilterGas" onclick="impostaFiltroCategoria('gas')">🔥 Gas</button>
+          <button type="button" class="preset-pill" id="btnFilterPun" onclick="impostaFiltroCategoria('pun')">📈 PUN</button>
+        </div>
+      </div>
+
+      <div id="pickerLoading" style="padding: 30px; text-align: center; color: var(--muted);">
+        <div style="font-size: 1.6rem; margin-bottom: 8px; animation: spin 1s linear infinite;">⏳</div>
+        Interrogazione sensori da Home Assistant in corso...
+      </div>
+
+      <div id="pickerError" style="display: none; padding: 16px; border-radius: 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid var(--err); color: #fca5a5; font-size: .88rem; margin-bottom: 14px;"></div>
+
+      <div id="pickerContent" style="display: none; max-height: 420px; overflow-y: auto;">
+        <table style="width: 100%;">
+          <thead>
+            <tr>
+              <th>Entity ID</th>
+              <th>Nome Amichevole</th>
+              <th>Stato Corrente</th>
+              <th>Unità</th>
+              <th style="text-align: right;">Azione</th>
+            </tr>
+          </thead>
+          <tbody id="pickerTableBody"></tbody>
+        </table>
+      </div>
+
+      <div style="display: justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--card-border);">
+        <span id="pickerSensoriTrovati" style="font-size: .8rem; color: var(--muted);"></span>
+        <button type="button" class="btn ghost" onclick="chiudiSelettoreSensori()">Chiudi</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ===================================================================
+       STILI CSS DEDICATI CENTRO DI CONTROLLO (UI PERFETTA & GLASSMORPHISM)
+       =================================================================== -->
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 12px rgba(56, 189, 248, 0.2); }
+      50% { box-shadow: 0 0 24px rgba(56, 189, 248, 0.45); }
+    }
+
+    .config-top-header {
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 20px 24px;
+    }
+    .config-main-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(2, 132, 199, 0.25), rgba(56, 189, 248, 0.35));
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+    }
+    .top-actions-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .btn-save-accent {
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #080d1a !important;
+      font-weight: 700 !important;
+      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+      border: none;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-save-accent:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5);
+    }
+    .btn-sm {
+      padding: 6px 14px;
+      font-size: .84rem;
+    }
+    .btn-xs {
+      padding: 4px 10px;
+      font-size: .78rem;
+    }
+
+    /* 3-Column Status Grid */
+    .status-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .status-card {
+      padding: 16px 18px;
+      margin-bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border-radius: 16px;
+    }
+    .status-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .card-title-sm {
+      margin: 0;
+      font-size: .95rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .card-sub-sm {
+      font-size: .75rem;
+      color: var(--muted);
+      display: block;
+    }
+    .icon-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+    .ha-circle { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); }
+    .meteo-circle { background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.3); }
+    .netatmo-circle { background: rgba(249, 115, 22, 0.15); border: 1px solid rgba(249, 115, 22, 0.3); }
+
+    .status-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin: 8px 0;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: .8rem;
+    }
+    .meta-label { color: var(--muted); }
+    .meta-val { font-weight: 600; color: var(--text); }
+    .font-mono { font-family: var(--font-mono); }
+    .w-100 { width: 100%; }
+
+    /* Sticky Tabbed Subnav */
+    .sticky-subnav-container {
+      position: sticky;
+      top: 65px;
+      z-index: 45;
+      margin-bottom: 22px;
+      background: rgba(11, 16, 27, 0.92);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 6px 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .subnav-tabs-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .subnav-tabs-wrapper::-webkit-scrollbar { display: none; }
+    .subnav-tab {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: .84rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      transition: all .18s ease;
+      font-family: inherit;
+    }
+    .subnav-tab:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .subnav-tab.active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.14);
+      border-color: rgba(56, 189, 248, 0.35);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+    }
+    .tab-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .dot-ok { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
+    .dot-warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }
+    .dot-off { background: #64748b; }
+    .tab-count-badge {
+      background: rgba(255, 255, 255, 0.1);
+      color: #cbd5e1;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: .72rem;
+    }
+
+    /* Section Cards */
+    .config-section-card {
+      margin-bottom: 24px;
+      transition: all .2s;
+    }
+    .section-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+    }
+    .ha-icon { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); }
+    .energy-icon { background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.3); }
+    .meteo-icon { background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.3); }
+    .netatmo-icon { background: rgba(249, 115, 22, 0.15); border: 1px solid rgba(249, 115, 22, 0.3); }
+    .logs-icon { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); }
+
+    .section-title {
+      margin: 0;
+      font-size: 1.18rem;
+      font-weight: 700;
+    }
+    .section-desc {
+      font-size: .82rem;
+      color: var(--muted);
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* Dual Mode Selector (PULL vs PUSH) */
+    .dual-mode-container {
+      background: rgba(11, 16, 27, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px 16px;
+    }
+    .dual-mode-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .dual-mode-selector {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .mode-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      transition: all .2s;
+    }
+    .mode-card:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .mode-card.active {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: #38bdf8;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+    }
+    .mode-card-radio {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid var(--muted);
+      margin-top: 2px;
+      flex-shrink: 0;
+      transition: all .2s;
+    }
+    .mode-card.active .mode-card-radio {
+      border-color: #38bdf8;
+      background: #0284c7;
+      box-shadow: inset 0 0 0 3px #0b101b;
+    }
+    .mode-title {
+      font-size: .92rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .mode-desc {
+      font-size: .78rem;
+      color: var(--muted);
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    /* Accordion Guide */
+    .guide-accordion-box {
+      background: rgba(2, 132, 199, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .guide-steps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+    .guide-step-card {
+      background: rgba(11, 16, 27, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .step-num {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #0284c7;
+      color: #fff;
+      font-weight: 700;
+      font-size: .75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-header h4 {
+      margin: 0;
+      font-size: .88rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .step-text {
+      color: var(--muted);
+      font-size: .8rem;
+      margin: 0 0 8px 0;
+      line-height: 1.45;
+    }
+
+    /* Push guide box */
+    .push-guide-box {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 14px;
+      padding: 16px;
+      margin-top: 14px;
+    }
+    .code-box-yaml {
+      background: #060911;
+      border: 1px solid var(--card-border);
+      color: #e2e8f0;
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: .76rem;
+      line-height: 1.45;
+      overflow-x: auto;
+      margin: 0;
+    }
+
+    /* Smart Discovery Bar */
+    .smart-discovery-bar {
+      background: rgba(234, 179, 8, 0.08);
+      border: 1px solid rgba(234, 179, 8, 0.25);
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* Presets Pills */
+    .preset-pill {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      color: #cbd5e1;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all .15s;
+    }
+    .preset-pill:hover, .preset-pill.active {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: var(--accent);
+      color: #38bdf8;
+      transform: translateY(-1px);
+    }
+    .preset-pill.city {
+      background: rgba(234, 179, 8, 0.08);
+      border-color: rgba(234, 179, 8, 0.2);
+      color: #fef08a;
+    }
+    .preset-pill.city:hover {
+      background: rgba(234, 179, 8, 0.2);
+      border-color: #eab308;
+      color: #fff;
+    }
+    .city-presets-card {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 18px;
+    }
+    .city-pills-wrap {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    /* Form Grid & Fields */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .field.full-width {
+      grid-column: 1 / -1;
+    }
+    .field label {
+      font-size: .82rem;
+      color: #cbd5e1;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .required-indicator {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .field input, .field select {
+      background: rgba(11, 16, 27, 0.85);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: .92rem;
+      width: 100%;
+      font-family: inherit;
+      transition: all .2s;
+    }
+    .field input:focus, .field select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 12px var(--accent-glow);
+      background: rgba(11, 16, 27, 0.98);
+    }
+    .field small.help {
+      color: var(--muted);
+      font-size: .75rem;
+      line-height: 1.4;
+    }
+    .input-with-action {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .input-action-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 10px;
+      font-size: .8rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all .15s;
+    }
+    .input-action-btn:hover {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: var(--accent);
+      color: #38bdf8;
+    }
+
+    /* Switch Style Toggle */
+    .switch-field {
+      flex-direction: row;
+      align-items: center;
+      gap: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .switch-container {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+      margin: 0;
+      cursor: pointer;
+    }
+    .switch-container input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      margin: 0;
+    }
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(255, 255, 255, 0.15);
+      transition: .25s;
+      border-radius: 24px;
+      border: 1px solid var(--card-border);
+    }
+    .switch-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .25s;
+      border-radius: 50%;
+    }
+    .switch-container input:checked + .switch-slider {
+      background-color: #0284c7;
+      border-color: #38bdf8;
+    }
+    .switch-container input:checked + .switch-slider:before {
+      transform: translateX(20px);
+    }
+    .switch-text {
+      font-size: .84rem;
+      line-height: 1.35;
+    }
+
+    /* Sticky Save Dock */
+    .sticky-save-dock {
+      position: sticky;
+      bottom: 18px;
+      z-index: 48;
+      margin-top: 28px;
+      margin-bottom: 24px;
+    }
+    .save-dock-inner {
+      background: rgba(15, 23, 42, 0.94);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 16px;
+      padding: 14px 22px;
+      box-shadow: 0 10px 35px rgba(0, 0, 0, 0.6);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 14px;
+      transition: all .25s ease;
+    }
+    .sticky-save-dock.dirty .save-dock-inner {
+      border-color: #38bdf8;
+      box-shadow: 0 10px 40px rgba(56, 189, 248, 0.25);
+      animation: pulseGlow 2.5s infinite;
+    }
+    .save-dock-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .dock-status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 10px #22c55e;
+      transition: all .2s;
+    }
+    .sticky-save-dock.dirty .dock-status-indicator {
+      background: #f59e0b;
+      box-shadow: 0 0 12px #f59e0b;
+    }
+    .dock-title {
+      font-weight: 700;
+      font-size: .94rem;
+      color: var(--text);
+      display: block;
+    }
+    .dock-subtitle {
+      color: var(--muted);
+      font-size: .78rem;
+      display: block;
+    }
+    .save-dock-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+  </style>
+
+
+  <!-- ===================================================================
+       LOGICA JAVASCRIPT REATTIVA COMPLETA (FRUIBILE & ZERO LATENZA)
+       =================================================================== -->
+  <script>
+    // Stato form dirty
+    let formIsDirty = false;
+    const initialFormValues = {};
+
+    document.addEventListener("DOMContentLoaded", () => {
+      // Salva stato iniziale form per dirty-check
+      const form = document.getElementById("configForm");
+      if (form) {
+        Array.from(form.elements).forEach(el => {
+          if (el.name) {
+            initialFormValues[el.name] = el.type === "checkbox" ? el.checked : el.value;
+            el.addEventListener("input", checkFormDirty);
+            el.addEventListener("change", checkFormDirty);
+          }
+        });
+      }
+    });
+
+    function checkFormDirty() {
+      const form = document.getElementById("configForm");
+      let changed = false;
+      Array.from(form.elements).forEach(el => {
+        if (el.name && initialFormValues.hasOwnProperty(el.name)) {
+          const cur = el.type === "checkbox" ? el.checked : el.value;
+          if (cur !== initialFormValues[el.name]) {
+            changed = true;
+          }
+        }
+      });
+      formIsDirty = changed;
+      aggiornaDockDirty(changed);
+    }
+
+    function aggiornaDockDirty(isDirty) {
+      const dock = document.getElementById("stickySaveDock");
+      const title = document.getElementById("dockStatusTitle");
+      const sub = document.getElementById("dockStatusSubtitle");
+      const submitBtn = document.getElementById("btnSubmitForm");
+
+      if (isDirty) {
+        dock.classList.add("dirty");
+        title.textContent = "Modifiche Pendenti Non Salvate";
+        sub.textContent = "Ricordati di salvare per applicare le modifiche al portale.";
+        submitBtn.style.animation = "pulseGlow 2s infinite";
+      } else {
+        dock.classList.remove("dirty");
+        title.textContent = "Configurazioni Pronte";
+        sub.textContent = "Tutti i valori sono sincronizzati.";
+        submitBtn.style.animation = "none";
+      }
+    }
+
+    function inviaFormConfig() {
+      document.getElementById("configForm").submit();
+    }
+
+    function ripristinaForm() {
+      const form = document.getElementById("configForm");
+      Array.from(form.elements).forEach(el => {
+        if (el.name && initialFormValues.hasOwnProperty(el.name)) {
+          if (el.type === "checkbox") {
+            el.checked = initialFormValues[el.name];
+          } else {
+            el.value = initialFormValues[el.name];
+          }
+        }
+      });
+      checkFormDirty();
+      mostraToast("Valori del form ripristinati.");
+    }
+
+    // GESTIONE SCHEDE SUBNAVBAR (TABS)
+    function cambiaTab(targetId) {
+      document.querySelectorAll(".subnav-tab").forEach(tab => {
+        tab.classList.toggle("active", tab.getAttribute("data-tab") === targetId);
+      });
+
+      const sections = document.querySelectorAll(".tab-content-block");
+      if (targetId === "all") {
+        sections.forEach(sec => {
+          sec.style.display = "block";
+          sec.style.animation = "fadeIn .3s ease";
+        });
+        mostraToast("Visualizzazione di tutte le sezioni attiva.");
+      } else {
+        sections.forEach(sec => {
+          if (sec.id === targetId) {
+            sec.style.display = "block";
+            sec.style.animation = "fadeIn .3s ease";
+            sec.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            sec.style.display = "none";
+          }
+        });
+      }
+    }
+
+    // DUAL MODE HA (PULL vs PUSH)
+    function selezionaModalitaHA(mode) {
+      const cardPull = document.getElementById("modeCardPull");
+      const cardPush = document.getElementById("modeCardPush");
+      const panelPull = document.getElementById("panelModePull");
+      const panelPush = document.getElementById("panelModePush");
+
+      if (mode === "pull") {
+        cardPull.classList.add("active");
+        cardPush.classList.remove("active");
+        panelPull.style.display = "block";
+        panelPush.style.display = "none";
+        mostraToast("Modalità selezionata: REST Polling (PULL Locale)");
+      } else {
+        cardPush.classList.add("active");
+        cardPull.classList.remove("active");
+        panelPull.style.display = "none";
+        panelPush.style.display = "block";
+        mostraToast("Modalità selezionata: Cloud Webhook (PUSH Remoto)");
+      }
+    }
+
+    // TOGGLE GUIDA PASSO-PASSO
+    function toggleGuidaRapida() {
+      const box = document.getElementById("boxGuidaPassoPasso");
+      const label = document.getElementById("labelGuidaToggle");
+      if (box.style.display === "none") {
+        box.style.display = "block";
+        box.style.animation = "fadeIn .3s ease";
+        label.textContent = "📘 Nascondi Guida ▲";
+      } else {
+        box.style.display = "none";
+        label.textContent = "📘 Mostra Guida Passo-Passo ▼";
+      }
+    }
+
+    // TOGGLE PASSWORD / TOKEN VISIBILITY
+    function toggleTokenVisibility(inputId, btnId) {
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(btnId);
+      if (!input) return;
+      if (input.type === "password") {
+        input.type = "text";
+        if (btn) btn.textContent = "🔒 Nascondi";
+      } else {
+        input.type = "password";
+        if (btn) btn.textContent = "👁️ Mostra";
+      }
+    }
+
+    // INCOLLA DAGLI APPUNTI
+    function incollaToken(inputId) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(text => {
+          if (text) {
+            input.value = text.trim();
+            input.dispatchEvent(new Event("input"));
+            mostraToast("Token incollato dagli appunti!");
+          }
+        }).catch(() => {
+          input.focus();
+          mostraToast("Premi CTRL+V per incollare.");
+        });
+      } else {
+        input.focus();
+      }
+    }
+
+    // COPIA TESTO NEGLI APPUNTI GENERICO
+    function copiaTesto(testo, msg) {
+      navigator.clipboard.writeText(testo).then(() => {
+        mostraToast(msg || "Copiato negli appunti!");
+      });
+    }
+
+    // APPLICA URL BASE HA
+    function applicaUrlBase(url) {
+      const input = document.getElementById("id_ha_base_url");
+      input.value = url;
+      input.dispatchEvent(new Event("input"));
+      document.getElementById("haLiveUrlDisplay").textContent = url;
+      mostraToast("URL Home Assistant impostato: " + url);
+    }
+
+    // COPIA YAML HELPER
+    function copiaYamlHelper() {
+      const snippet = document.getElementById("yamlHelperSnippet").textContent;
+      copiaTesto(snippet, "Snippet YAML Helper copiato negli appunti!");
+    }
+
+    // COPIA AUTOMATION PUSH YAML
+    function copiaAutomazionePushYaml() {
+      const snippet = document.getElementById("automationPushSnippet").textContent;
+      copiaTesto(snippet, "Automazione HA Push YAML copiata!");
+    }
+
+    // APPLICA CITTA METEO
+    function applicaCitta(nome, lat, lon) {
+      const fCitta = document.getElementById("id_meteo_citta");
+      const fLat = document.getElementById("id_meteo_latitude");
+      const fLon = document.getElementById("id_meteo_longitude");
+      fCitta.value = nome;
+      fLat.value = lat;
+      fLon.value = lon;
+      fCitta.dispatchEvent(new Event("input"));
+      fLat.dispatchEvent(new Event("input"));
+      fLon.dispatchEvent(new Event("input"));
+      document.getElementById("meteoLiveCittaDisplay").textContent = nome;
+      mostraToast("Città impostata: " + nome + " (" + lat + ", " + lon + ")");
+    }
+
+    // GEOLOCALIZZAZIONE BROWSER
+    function rilevaPosizioneBrowser() {
+      if (!navigator.geolocation) {
+        mostraToast("Geolocalizzazione non supportata dal tuo browser.");
+        return;
+      }
+      mostraToast("Rilevamento posizione GPS in corso...");
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const lat = pos.coords.latitude.toFixed(4);
+          const lon = pos.coords.longitude.toFixed(4);
+          document.getElementById("id_meteo_latitude").value = lat;
+          document.getElementById("id_meteo_longitude").value = lon;
+          document.getElementById("id_meteo_citta").value = "Posizione Rilevata";
+          document.getElementById("id_meteo_latitude").dispatchEvent(new Event("input"));
+          document.getElementById("id_meteo_longitude").dispatchEvent(new Event("input"));
+          document.getElementById("id_meteo_citta").dispatchEvent(new Event("input"));
+          mostraToast("Coordinate GPS rilevate: " + lat + ", " + lon);
+        },
+        err => {
+          mostraToast("Impossibile ottenere la posizione GPS (" + err.message + ")");
+        },
+        { timeout: 7000 }
+      );
+    }
+
+    // TEST SERVIZIO SINGOLO
+    function testServizioSingolo(servizio) {
+      let targetFeedback = document.getElementById("diagnosticaGlobalFeedback");
+      let url = "/api/diagnostica/?servizio=" + servizio;
+
+      if (servizio === "ha") {
+        targetFeedback = document.getElementById("haTestFeedback");
+        const baseUrl = document.getElementById("id_ha_base_url").value.trim();
+        const token = document.getElementById("id_ha_token").value.trim();
+        const tlsVerify = document.getElementById("id_ha_tls_verify").checked ? "true" : "false";
+        url += "&url=" + encodeURIComponent(baseUrl) + "&token=" + encodeURIComponent(token) + "&tls_verify=" + tlsVerify;
+      } else if (servizio === "meteo") {
+        targetFeedback = document.getElementById("meteoTestFeedback");
+        const lat = document.getElementById("id_meteo_latitude").value.trim();
+        const lon = document.getElementById("id_meteo_longitude").value.trim();
+        const citta = document.getElementById("id_meteo_citta").value.trim();
+        url += "&lat=" + encodeURIComponent(lat) + "&lon=" + encodeURIComponent(lon) + "&citta=" + encodeURIComponent(citta);
+      } else if (servizio === "netatmo") {
+        targetFeedback = document.getElementById("netatmoTestFeedback");
+        const cId = document.getElementById("id_netatmo_client_id").value.trim();
+        const cSec = document.getElementById("id_netatmo_client_secret").value.trim();
+        const refTok = document.getElementById("id_netatmo_refresh_token").value.trim();
+        url += "&client_id=" + encodeURIComponent(cId) + "&client_secret=" + encodeURIComponent(cSec) + "&refresh_token=" + encodeURIComponent(refTok);
+      }
+
+      targetFeedback.style.display = "block";
+      targetFeedback.style.background = "rgba(255, 255, 255, 0.05)";
+      targetFeedback.style.border = "1px solid var(--card-border)";
+      targetFeedback.style.color = "var(--text)";
+      targetFeedback.innerHTML = "⏳ <strong>Verifica in corso...</strong> Connessione al servizio in corso...";
+
+      return fetch(url)
+        .then(r => r.json())
+        .then(d => {
+          if (d.ok) {
+            targetFeedback.style.background = "rgba(34, 197, 94, 0.12)";
+            targetFeedback.style.border = "1px solid var(--ok)";
+            targetFeedback.style.color = "#86efac";
+            targetFeedback.innerHTML = "✅ <strong>Test Riuscito:</strong> " + d.messaggio;
+
+            if (servizio === "ha") {
+              const badge = document.getElementById("haLiveBadge");
+              badge.className = "badge ok";
+              badge.innerHTML = "🟢 Connesso (" + (d.latency_ms || 15) + " ms)";
+            } else if (servizio === "meteo") {
+              const badge = document.getElementById("meteoLiveBadge");
+              badge.className = "badge ok";
+              badge.innerHTML = "🟢 Clima OK (" + (d.t_media || "—") + " °C)";
+            } else if (servizio === "netatmo") {
+              const badge = document.getElementById("netatmoLiveBadge");
+              badge.className = "badge ok";
+              badge.innerHTML = "🟢 Cloud OK";
+            }
+            return { servizio, ok: true, msg: d.messaggio };
+          } else {
+            targetFeedback.style.background = "rgba(239, 68, 68, 0.12)";
+            targetFeedback.style.border = "1px solid var(--err)";
+            targetFeedback.style.color = "#fca5a5";
+            targetFeedback.innerHTML = "❌ <strong>Verifica Fallita:</strong> " + d.messaggio;
+
+            if (servizio === "ha") {
+              const badge = document.getElementById("haLiveBadge");
+              badge.className = "badge off";
+              badge.innerHTML = "🔴 Non Raggiungibile";
+            } else if (servizio === "netatmo") {
+              const badge = document.getElementById("netatmoLiveBadge");
+              badge.className = "badge off";
+              badge.innerHTML = "🔴 Errore Auth";
+            }
+            return { servizio, ok: false, msg: d.messaggio };
+          }
+        })
+        .catch(err => {
+          targetFeedback.style.background = "rgba(239, 68, 68, 0.12)";
+          targetFeedback.style.border = "1px solid var(--err)";
+          targetFeedback.style.color = "#fca5a5";
+          targetFeedback.innerHTML = "❌ <strong>Errore di Rete:</strong> Impossibile eseguire la richiesta (" + err + ")";
+          return { servizio, ok: false, msg: "" + err };
+        });
+    }
+
+    // DIAGNOSTICA COMPLETA SIMULTANEA DEI 3 SERVIZI
+    function testTuttiIServizi() {
+      const box = document.getElementById("diagnosticaGlobalFeedback");
+      box.style.display = "block";
+      box.style.background = "rgba(15, 23, 42, 0.9)";
+      box.style.border = "1px solid #38bdf8";
+      box.style.color = "#f1f5f9";
+      box.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <strong>⚡ Diagnostica Completa in Corso...</strong>
+          <span style="font-size:.8rem; animation: spin 1s linear infinite;">⏳</span>
+        </div>
+        <div style="font-size:.84rem; color:var(--muted);">Interrogazione simultanea di Home Assistant, Open-Meteo e Netatmo...</div>
+      `;
+
+      Promise.all([
+        testServizioSingolo("ha"),
+        testServizioSingolo("meteo"),
+        testServizioSingolo("netatmo")
+      ]).then(results => {
+        const okCount = results.filter(r => r && r.ok).length;
+        box.style.background = okCount === 3 ? "rgba(34, 197, 94, 0.12)" : "rgba(15, 23, 42, 0.95)";
+        box.style.borderColor = okCount === 3 ? "var(--ok)" : "var(--accent)";
+        box.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <strong style="font-size:.95rem;">⚡ Diagnostica Completata: ${okCount} su 3 Servizi Operativi</strong>
+            <button type="button" class="btn ghost btn-xs" onclick="document.getElementById('diagnosticaGlobalFeedback').style.display='none'">Chiudi ✕</button>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-top:8px; font-size:.82rem;">
+            ${results.map(r => `
+              <div style="padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid ${r && r.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}">
+                <div style="font-weight:700; color:${r && r.ok ? '#86efac' : '#fca5a5'};">
+                  ${r && r.ok ? '✅' : '❌'} ${r.servizio.toUpperCase()}
+                </div>
+                <div style="color:var(--muted); font-size:.76rem; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.msg || ''}</div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+        mostraToast("Diagnostica completata: " + okCount + "/3 servizi operativi");
+      });
+    }
+
+    // SMART AUTO-DETECTION SENSORI CON 1 CLIC
+    function autoRilevaSensore(tipo) {
+      const btn = tipo === "energy" ? document.getElementById("btnAutoDetectLuce") : document.getElementById("btnAutoDetectGas");
+      const origText = btn.textContent;
+      btn.textContent = "⏳ Ricerca...";
+
+      const baseUrl = document.getElementById("id_ha_base_url").value.trim();
+      const token = document.getElementById("id_ha_token").value.trim();
+      const tlsVerify = document.getElementById("id_ha_tls_verify").checked ? "true" : "false";
+
+      let fetchUrl = "/api/ha/discovery/";
+      if (baseUrl && token) {
+        fetchUrl += "?url=" + encodeURIComponent(baseUrl) + "&token=" + encodeURIComponent(token) + "&tls_verify=" + tlsVerify;
+      }
+
+      fetch(fetchUrl)
+        .then(r => r.json())
+        .then(data => {
+          btn.textContent = origText;
+          if (!data.ok || !data.sensori || data.sensori.length === 0) {
+            mostraToast("Nessun sensore rilevato. Verifica URL e Token di Home Assistant.");
+            return;
+          }
+          const sensori = data.sensori;
+          let trovato = null;
+
+          if (tipo === "energy") {
+            trovato = sensori.find(s => {
+              const u = (s.unit || "").toLowerCase();
+              const id = s.entity_id.toLowerCase();
+              return u === "kwh" && (id.includes("energy") || id.includes("shelly") || id.includes("consumo") || id.includes("grid"));
+            }) || sensori.find(s => (s.unit || "").toLowerCase() === "kwh");
+
+            if (trovato) {
+              const el = document.getElementById("id_ha_entity_kwh_consumo");
+              el.value = trovato.entity_id;
+              el.dispatchEvent(new Event("input"));
+              evidenziaCampo(el);
+              mostraToast("Sensore Luce associato automaticamente: " + trovato.entity_id);
+            } else {
+              mostraToast("Nessun sensore in kWh evidente. Apri 'Esplora Tutti i Sensori'.");
+            }
+          } else {
+            trovato = sensori.find(s => {
+              const u = (s.unit || "").toLowerCase();
+              const id = s.entity_id.toLowerCase();
+              return (u.includes("smc") || u.includes("m³") || u.includes("m3") || id.includes("gas"));
+            });
+
+            if (trovato) {
+              const el = document.getElementById("id_ha_entity_smc_consumo");
+              el.value = trovato.entity_id;
+              el.dispatchEvent(new Event("input"));
+              evidenziaCampo(el);
+              mostraToast("Sensore Gas associato automaticamente: " + trovato.entity_id);
+            } else {
+              mostraToast("Nessun sensore gas evidente. Apri 'Esplora Tutti i Sensori'.");
+            }
+          }
+        })
+        .catch(err => {
+          btn.textContent = origText;
+          mostraToast("Errore di connessione a Home Assistant (" + err + ")");
+        });
+    }
+
+    function evidenziaCampo(el) {
+      el.focus();
+      el.style.borderColor = "var(--ok)";
+      el.style.boxShadow = "0 0 15px rgba(34, 197, 94, 0.4)";
+      setTimeout(() => {
+        el.style.borderColor = "";
+        el.style.boxShadow = "";
+      }, 1500);
+    }
+
+    // MODAL SELETTORE SENSORI
+    let targetFieldForPicker = null;
+    let sensoriCache = [];
+    let filtroAttivo = "all";
+
+    function apriSelettoreSensori(targetFieldId, categoriaDefault) {
+      targetFieldForPicker = targetFieldId;
+      filtroAttivo = categoriaDefault || "all";
+
+      const modal = document.getElementById("sensorPickerModal");
+      modal.classList.add("open");
+
+      const loading = document.getElementById("pickerLoading");
+      const content = document.getElementById("pickerContent");
+      const errBox = document.getElementById("pickerError");
+      const tbody = document.getElementById("pickerTableBody");
+
+      loading.style.display = "block";
+      content.style.display = "none";
+      errBox.style.display = "none";
+      tbody.innerHTML = "";
+      document.getElementById("sensorSearchInput").value = "";
+
+      impostaFiltroCategoria(filtroAttivo, false);
+
+      const baseUrl = document.getElementById("id_ha_base_url").value.trim();
+      const token = document.getElementById("id_ha_token").value.trim();
+      const tlsVerify = document.getElementById("id_ha_tls_verify").checked ? "true" : "false";
+
+      let fetchUrl = "/api/ha/discovery/";
+      if (baseUrl && token) {
+        fetchUrl += "?url=" + encodeURIComponent(baseUrl) + "&token=" + encodeURIComponent(token) + "&tls_verify=" + tlsVerify;
+      }
+
+      fetch(fetchUrl)
+        .then(r => r.json())
+        .then(data => {
+          loading.style.display = "none";
+          if (!data.ok && data.errore) {
+            errBox.style.display = "block";
+            errBox.innerHTML = "<strong>Errore:</strong> " + data.errore + "<br><small>Verifica che URL e Token di Home Assistant siano corretti.</small>";
+            return;
+          }
+          sensoriCache = data.sensori || [];
+          content.style.display = "block";
+          renderizzaSensori(sensoriCache);
+        })
+        .catch(err => {
+          loading.style.display = "none";
+          errBox.style.display = "block";
+          errBox.innerHTML = "<strong>Errore di connessione:</strong> Impossibile interrogare Home Assistant (" + err + ")";
+        });
+    }
+
+    function chiudiSelettoreSensori() {
+      document.getElementById("sensorPickerModal").classList.remove("open");
+    }
+
+    function impostaFiltroCategoria(categoria, reRender = true) {
+      filtroAttivo = categoria;
+      document.getElementById("btnFilterAll").classList.toggle("active", categoria === "all");
+      document.getElementById("btnFilterEnergy").classList.toggle("active", categoria === "energy");
+      document.getElementById("btnFilterGas").classList.toggle("active", categoria === "gas");
+      document.getElementById("btnFilterPun").classList.toggle("active", categoria === "pun");
+      if (reRender) {
+        filtraTabellaSensori();
+      }
+    }
+
+    function filtraTabellaSensori() {
+      const q = document.getElementById("sensorSearchInput").value.toLowerCase().trim();
+      const filtrati = sensoriCache.filter(s => {
+        const matchesQuery = !q || s.entity_id.toLowerCase().includes(q) || (s.name && s.name.toLowerCase().includes(q));
+        if (!matchesQuery) return false;
+
+        const u = (s.unit || "").toLowerCase();
+        const id = s.entity_id.toLowerCase();
+        if (filtroAttivo === "energy") {
+          return u.includes("wh") || u.includes("w") || id.includes("energy") || id.includes("shelly") || id.includes("consumo") || id.includes("contatore");
+        } else if (filtroAttivo === "gas") {
+          return u.includes("smc") || u.includes("m³") || u.includes("m3") || id.includes("gas");
+        } else if (filtroAttivo === "pun") {
+          return id.includes("pun");
+        }
+        return true;
+      });
+      renderizzaSensori(filtrati);
+    }
+
+    function renderizzaSensori(sensori) {
+      const tbody = document.getElementById("pickerTableBody");
+      const counter = document.getElementById("pickerSensoriTrovati");
+      tbody.innerHTML = "";
+      counter.textContent = sensori.length + " sensori disponibili";
+
+      if (sensori.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 24px;">Nessun sensore trovato per i filtri selezionati.</td></tr>';
+        return;
+      }
+
+      sensori.forEach(s => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><code style="color:#7dd3fc; font-size:.82rem;">${s.entity_id}</code></td>
+          <td style="font-weight:600; font-size:.88rem;">${s.name || s.entity_id}</td>
+          <td><strong>${s.state}</strong></td>
+          <td><span class="badge ok">${s.unit || '—'}</span></td>
+          <td style="text-align: right;">
+            <button type="button" class="btn btn-xs" style="background:#0284c7; color:#fff;" onclick="selezionaSensorePerTarget('${s.entity_id}')">
+              ✅ Usa Questo
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function selezionaSensorePerTarget(entityId) {
+      if (targetFieldForPicker) {
+        const el = document.getElementById(targetFieldForPicker);
+        if (el) {
+          el.value = entityId;
+          el.dispatchEvent(new Event("input"));
+          evidenziaCampo(el);
+        }
+      }
+      chiudiSelettoreSensori();
+      mostraToast("Sensore selezionato: " + entityId);
+    }
+
+    // TOAST NOTIFIER
+    function mostraToast(msg) {
+      let toast = document.getElementById("liveToastAlert");
+      if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "liveToastAlert";
+        toast.style.position = "fixed";
+        toast.style.bottom = "24px";
+        toast.style.right = "24px";
+        toast.style.background = "#0284c7";
+        toast.style.color = "#fff";
+        toast.style.padding = "12px 20px";
+        toast.style.borderRadius = "12px";
+        toast.style.fontWeight = "600";
+        toast.style.fontSize = ".88rem";
+        toast.style.boxShadow = "0 10px 25px rgba(0,0,0,0.5)";
+        toast.style.zIndex = "999";
+        toast.style.transition = "all .3s ease";
+        document.body.appendChild(toast);
+      }
+      toast.textContent = msg;
+      toast.style.opacity = "1";
+      toast.style.transform = "translateY(0)";
+      clearTimeout(window._toastTimeout);
+      window._toastTimeout = setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(10px)";
+      }, 3000);
+    }
+  </script>
+
+{% endblock %}

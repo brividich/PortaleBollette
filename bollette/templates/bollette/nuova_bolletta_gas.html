@@ -1,0 +1,470 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Nuova Bolletta Gas — Portale Bollette{% endblock %}
+
+{% block content %}
+  <div class="card" style="max-width: 860px; margin: 0 auto;">
+    <div class="card-header">
+      <div style="display: flex; align-items: center; gap: 14px;">
+        <span style="font-size: 1.8rem; filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.4));">🔥</span>
+        <div>
+          <h2 style="margin: 0; font-size: 1.4rem; font-weight: 700; color: #f8fafc;">Nuova Bolletta Gas Metano</h2>
+          <span style="color: var(--muted); font-size: .84rem;">Archiviazione fornitura gas con estrazione automatica da PDF, calcolo Smc/Gradi Giorno e benchmark PSV.</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span class="badge gas" style="font-size: .8rem; padding: 4px 10px;">🔥 Gas</span>
+        <a href="{% url 'nuova_bolletta' %}" class="btn ghost btn-xs" title="Passa all'inserimento bolletta luce">
+          Passa a Luce ⚡ →
+        </a>
+      </div>
+    </div>
+
+    <!-- DROPZONE INTERATTIVA PER AUTOCOMPILAZIONE ISTANTANEA -->
+    <div class="smart-pdf-dropzone gas-dropzone" id="pdfDropzone">
+      <input type="file" id="pdfSmartInput" accept=".pdf" style="display: none;">
+      <div class="dropzone-content" onclick="document.getElementById('pdfSmartInput').click()">
+        <div class="dropzone-icon gas-icon">📄</div>
+        <div class="dropzone-text">
+          <strong style="font-size: 1.05rem; color: #f1f5f9; display: block; margin-bottom: 4px;">
+            Trascina qui il PDF della bolletta oppure <span style="color: #f97316; text-decoration: underline;">clicca per selezionarlo</span>
+          </strong>
+          <span style="color: var(--muted); font-size: .85rem; line-height: 1.4; display: block;">
+            Il motore leggerà all'istante Fornitore, PDR, Numero fattura, Date, Importo totale e Consumo Smc, <strong>autocompilando tutti i campi sottostanti</strong>.
+          </span>
+        </div>
+      </div>
+
+      <!-- STATO CARICAMENTO -->
+      <div id="dropzoneLoading" class="dropzone-status loading" style="display: none;">
+        <div class="spinner-icon">⏳</div>
+        <div>
+          <strong id="loadingFilename">Lettura e analisi del PDF gas in corso...</strong>
+          <div style="font-size: .78rem; color: #94a3b8;">Estrazione parametri volumetrici e coefficienti in tempo reale.</div>
+        </div>
+      </div>
+
+      <!-- FEEDBACK ESITO ANALISI -->
+      <div id="dropzoneFeedback" class="dropzone-result-card gas-result" style="display: none;"></div>
+
+      <!-- ERRORE -->
+      <div id="dropzoneError" class="dropzone-status error" style="display: none;"></div>
+    </div>
+
+    <!-- FORM DI INSERIMENTO / MODIFICA DATI -->
+    <form method="post" action="{% url 'nuova_bolletta_gas' %}" enctype="multipart/form-data" id="bollettaForm">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <ul class="messages">{% for e in form.non_field_errors %}<li class="error">{{ e }}</li>{% endfor %}</ul>
+      {% endif %}
+
+      <div class="form-grid">
+        {% for field in form %}
+          <div class="field {% if field.name == 'note' %}full-width{% endif %}" id="wrap_{{ field.name }}">
+            <label for="{{ field.id_for_label }}">
+              {{ field.label }}
+              {% if field.field.required %}<span style="color: var(--gas);">*</span>{% endif %}
+            </label>
+            {{ field }}
+            {% if field.help_text %}<small class="help">{{ field.help_text }}</small>{% endif %}
+            {% for e in field.errors %}<small class="err">{{ e }}</small>{% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <div style="margin-top: 30px; display: flex; gap: 12px; justify-content: space-between; align-items: center; border-top: 1px solid var(--card-border); padding-top: 20px; flex-wrap: wrap;">
+        <span style="font-size: .82rem; color: var(--muted); display: flex; align-items: center; gap: 6px;">
+          <span>💡</span> I campi compilati dal PDF sono modificabili liberamente prima del salvataggio definitivo.
+        </span>
+        <div style="display: flex; gap: 10px;">
+          <a href="{% url 'home' %}" class="btn ghost">↩️ Annulla</a>
+          <button type="submit" class="btn" style="background: linear-gradient(135deg, #f97316, #fb923c); color: #080d1a; font-weight: 700; padding: 10px 26px; box-shadow: 0 4px 14px rgba(249, 115, 22, 0.3);">
+            💾 Salva Bolletta Gas
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <style>
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes pulseSuccess {
+      0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6); }
+      70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+    }
+    .spinner-icon {
+      font-size: 1.4rem;
+      animation: spin 1s linear infinite;
+    }
+
+    .smart-pdf-dropzone {
+      background: rgba(249, 115, 22, 0.03);
+      border: 2px dashed rgba(249, 115, 22, 0.35);
+      border-radius: 16px;
+      padding: 22px;
+      margin-bottom: 26px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .25s ease;
+      position: relative;
+    }
+    .smart-pdf-dropzone:hover, .smart-pdf-dropzone.dragover {
+      background: rgba(249, 115, 22, 0.08);
+      border-color: #f97316;
+      box-shadow: 0 0 24px rgba(249, 115, 22, 0.2);
+    }
+    .dropzone-content {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .dropzone-icon.gas-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: rgba(249, 115, 22, 0.12);
+      border: 1px solid rgba(249, 115, 22, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+    }
+    .dropzone-text {
+      text-align: left;
+      max-width: 560px;
+    }
+    .dropzone-status {
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: .88rem;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      text-align: left;
+    }
+    .dropzone-status.loading {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      color: #e2e8f0;
+    }
+    .dropzone-status.error {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+
+    /* CARD RISULTATI PARSING */
+    .dropzone-result-card {
+      margin-top: 16px;
+      text-align: left;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(34, 197, 94, 0.35);
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+    .result-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .result-kpi {
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: .82rem;
+    }
+    .result-kpi-label {
+      color: var(--muted);
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .result-kpi-val {
+      font-weight: 700;
+      color: #f8fafc;
+      font-size: .95rem;
+      margin-top: 2px;
+    }
+    .result-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .chip {
+      font-size: .72rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .chip.ok {
+      background: rgba(34, 197, 94, 0.15);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .chip.ko {
+      background: rgba(148, 163, 184, 0.1);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field.full-width { grid-column: 1 / -1; }
+    .field label { font-size: .82rem; color: #cbd5e1; font-weight: 600; }
+    .field input, .field select, .field textarea {
+      background: rgba(11, 16, 27, 0.95);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: .95rem;
+      width: 100%;
+      font-family: inherit;
+      transition: all .25s ease;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      outline: none;
+      border-color: var(--gas);
+      box-shadow: 0 0 10px var(--gas-glow);
+    }
+    .field.autofilled input, .field.autofilled select, .field.autofilled textarea {
+      border-color: var(--ok) !important;
+      background: rgba(34, 197, 94, 0.08) !important;
+      animation: pulseSuccess 1.5s ease-out;
+    }
+    .field small.help { color: var(--muted); font-size: .75rem; margin-top: 2px; }
+    .field small.err { color: var(--err); font-size: .78rem; font-weight: 600; }
+  </style>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const dropzone = document.getElementById("pdfDropzone");
+      const fileInput = document.getElementById("pdfSmartInput");
+      const formFileInput = document.getElementById("id_file_bolletta");
+
+      // Click sul dropzone
+      fileInput.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files[0]) {
+          processaFilePdfGas(e.target.files[0]);
+        }
+      });
+
+      // Se l'utente seleziona un file direttamente dal campo file del form
+      if (formFileInput) {
+        formFileInput.addEventListener("change", (e) => {
+          if (e.target.files && e.target.files[0]) {
+            processaFilePdfGas(e.target.files[0]);
+          }
+        });
+      }
+
+      // Drag & Drop
+      ["dragenter", "dragover"].forEach(evt => {
+        dropzone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.add("dragover");
+        });
+      });
+
+      ["dragleave", "drop"].forEach(evt => {
+        dropzone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.remove("dragover");
+        });
+      });
+
+      dropzone.addEventListener("drop", (e) => {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+          const file = e.dataTransfer.files[0];
+          processaFilePdfGas(file);
+        }
+      });
+    });
+
+    function processaFilePdfGas(file) {
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        mostraErroreDropzone("Il file selezionato non è un documento PDF (" + file.name + ")");
+        return;
+      }
+
+      const formFileInput = document.getElementById("id_file_bolletta");
+      if (formFileInput) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          formFileInput.files = dt.files;
+        } catch (err) {
+          console.log("DataTransfer sync fallback", err);
+        }
+      }
+
+      const loadingBox = document.getElementById("dropzoneLoading");
+      const feedbackBox = document.getElementById("dropzoneFeedback");
+      const errorBox = document.getElementById("dropzoneError");
+      const loadingFilename = document.getElementById("loadingFilename");
+
+      const sizeKb = Math.round(file.size / 1024);
+      loadingFilename.textContent = `Lettura di "${file.name}" (${sizeKb} KB) in corso...`;
+
+      loadingBox.style.display = "flex";
+      feedbackBox.style.display = "none";
+      errorBox.style.display = "none";
+
+      const formData = new FormData();
+      formData.append("file_bolletta", file);
+
+      fetch("/api/bolletta/analizza-pdf/", {
+        method: "POST",
+        body: formData,
+      })
+      .then(r => r.json())
+      .then(d => {
+        loadingBox.style.display = "none";
+        if (!d.ok) {
+          mostraErroreDropzone(d.errore || "Impossibile estrarre dati dal file PDF.");
+          return;
+        }
+
+        // Compila i campi del modulo
+        compilaCampiGas(d);
+
+        // Rendering card diagnostica dettagliata
+        renderCardRisultatiGas(d, file.name);
+      })
+      .catch(err => {
+        loadingBox.style.display = "none";
+        mostraErroreDropzone("Errore di rete durante la lettura del PDF (" + err + ")");
+      });
+    }
+
+    function renderCardRisultatiGas(d, nomeFile) {
+      const feedbackBox = document.getElementById("dropzoneFeedback");
+      const score = d.score || 0;
+      let pStr = "—";
+      if (d.periodo_inizio_iso && d.periodo_fine_iso) {
+        pStr = `${d.periodo_inizio_iso} → ${d.periodo_fine_iso}`;
+      }
+
+      let warningHtml = "";
+      if (d.tipo === "luce") {
+        warningHtml = `
+          <div style="margin-top: 10px; padding: 10px 14px; background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.4); border-radius: 8px; font-size: .84rem;">
+            ⚠️ <strong>Attenzione:</strong> Questo PDF fa riferimento a una fornitura di <strong>Energia Elettrica (kWh/POD)</strong>.
+            <a href="{% url 'nuova_bolletta' %}" style="color: #facc15; font-weight: 700; margin-left: 8px; text-decoration: underline;">
+              Passa al form Bolletta Luce →
+            </a>
+          </div>
+        `;
+      }
+
+      let chipsOk = (d.campi_estratti || []).map(c => `<span class="chip ok">✓ ${c}</span>`).join(" ");
+      let chipsKo = (d.campi_mancanti || []).map(c => `<span class="chip ko">? ${c}</span>`).join(" ");
+
+      feedbackBox.innerHTML = `
+        <div class="result-header">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 1.2rem;">✅</span>
+            <strong>${d.fornitore || 'Fornitore Rilevato'}</strong>
+            ${d.numero_fattura ? `<span style="font-size: .78rem; color: var(--muted); font-family: var(--font-mono);">N. ${d.numero_fattura}</span>` : ''}
+            <span class="badge info" style="font-size: .74rem; background: rgba(249, 115, 22, 0.15); border: 1px solid rgba(249, 115, 22, 0.35); color: #fdba74;">
+              🎯 ${d.fonte_parsing || 'Parser Dedicato'} &bull; <code>${d.parser_usato || 'Strategy'}</code>
+            </span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span class="badge ${score >= 80 ? 'ok' : (score >= 50 ? 'warn' : 'off')}">Affidabilità: ${score}%</span>
+            <button type="button" class="btn ghost btn-xs" onclick="document.getElementById('pdfSmartInput').click()" style="padding: 2px 8px; font-size: .74rem;">Cambia PDF</button>
+          </div>
+        </div>
+
+        <div class="result-kpi-grid">
+          <div class="result-kpi">
+            <div class="result-kpi-label">Consumo</div>
+            <div class="result-kpi-val" style="color: var(--gas);">${d.consumo !== null ? d.consumo + ' Smc' : '—'}</div>
+          </div>
+          <div class="result-kpi">
+            <div class="result-kpi-label">Importo Totale</div>
+            <div class="result-kpi-val" style="color: #4ade80;">${d.importo_totale !== null ? d.importo_totale + ' €' : '—'}</div>
+          </div>
+          <div class="result-kpi">
+            <div class="result-kpi-label">Periodo</div>
+            <div class="result-kpi-val" style="font-size: .82rem;">${pStr}</div>
+          </div>
+          <div class="result-kpi">
+            <div class="result-kpi-label">Codice PDR</div>
+            <div class="result-kpi-val" style="font-size: .8rem; font-family: var(--font-mono);">${d.pdr || '—'}</div>
+          </div>
+        </div>
+
+        ${warningHtml}
+
+        <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+          <div class="result-chips">
+            <span style="font-size: .72rem; color: var(--muted);">Campi estratti:</span>
+            ${chipsOk} ${chipsKo}
+          </div>
+          <span style="font-size: .72rem; color: #64748b; font-family: var(--font-mono);">${nomeFile}</span>
+        </div>
+      `;
+      feedbackBox.style.display = "block";
+    }
+
+    function compilaCampiGas(d) {
+      const mapping = {
+        "id_fornitore": d.fornitore,
+        "id_pdr": d.pdr,
+        "id_numero_fattura": d.numero_fattura,
+        "id_data_emissione": d.data_emissione_iso,
+        "id_periodo_inizio": d.periodo_inizio_iso,
+        "id_periodo_fine": d.periodo_fine_iso,
+        "id_importo_totale": d.importo_totale,
+        "id_smc_fatturati": d.consumo,
+        "id_coeff_c": d.coeff_c,
+        "id_potere_calorifico_pcs": d.potere_calorifico_pcs,
+      };
+
+      Object.entries(mapping).forEach(([fieldId, val]) => {
+        if (val !== undefined && val !== null && val !== "") {
+          const el = document.getElementById(fieldId);
+          if (el) {
+            el.value = val;
+            const wrap = el.closest(".field");
+            if (wrap) {
+              wrap.classList.add("autofilled");
+              setTimeout(() => wrap.classList.remove("autofilled"), 3500);
+            }
+          }
+        }
+      });
+    }
+
+    function mostraErroreDropzone(msg) {
+      const errorBox = document.getElementById("dropzoneError");
+      errorBox.innerHTML = "❌ " + msg;
+      errorBox.style.display = "block";
+    }
+  </script>
+{% endblock %}

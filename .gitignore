@@ -1,0 +1,33 @@
+# Segreti e file di ambiente
+.env
+.env.local
+
+# Database SQLite locale e dump di test
+db.sqlite3
+*.sqlite3
+dump.json
+scratch_*.json
+
+# File media e PDF caricati (dati personali)
+media/
+bollette_pdf/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+
+# Editor e OS
+.vscode/
+.idea/
+.agents/
+.claude/
+.DS_Store
+Thumbs.db
+
+# Log
+*.log

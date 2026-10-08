@@ -1,0 +1,346 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Audit Congruenza Bollette vs Home Assistant — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <div class="card-header" style="margin-bottom:20px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <h1 style="font-size:1.55rem;font-weight:800;margin:0;letter-spacing:-0.02em">🔍 Audit Bollette vs Home Assistant</h1>
+        {% if riepilogo.ha_configurato %}
+          <span class="badge ok">
+            <span class="pulse-dot"></span> Bridge HA Online
+          </span>
+        {% else %}
+          <a href="{% url 'configurazioni' %}" class="badge warn" style="text-decoration:none">
+            ⚠️ Configura Token HA
+          </a>
+        {% endif %}
+      </div>
+      <span style="color:var(--text-muted);font-size:.88rem">
+        Audit di congruenza tra i consumi fatturati dal fornitore e le misurazioni reali dei tuoi contatori o pinze amperometriche monitorate su Home Assistant.
+      </span>
+    </div>
+  </div>
+
+  <!-- Barra Sotto-Navigazione Hub HA -->
+  <div class="sub-nav">
+    <a href="{% url 'dispositivi_ha' %}">🔌 Dispositivi & Live Metering</a>
+    <a href="{% url 'confronto_ha' %}" class="active">🔍 Audit Congruenza Bollette</a>
+    <a href="{% url 'netatmo_dashboard' %}">🔥 Netatmo Riscaldamento</a>
+    <button type="button" onclick="openDiscoveryModal()">📡 Sensori Rilevati HA</button>
+  </div>
+
+  <!-- KPI Generali di Congruenza -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 26px;">
+    
+    <div class="metric" style="border-left:3px solid var(--accent)">
+      <div class="label">Bollette Validate con HA</div>
+      <div class="value" style="color:var(--accent)">
+        {{ riepilogo.tot_validati }} <small style="font-size:.8rem;color:var(--text-muted)">periodi</small>
+      </div>
+      <div class="subtext">Luce: <strong>{{ riepilogo.n_validati_luce }}</strong> · Gas: <strong>{{ riepilogo.n_validati_gas }}</strong></div>
+    </div>
+
+    <div class="metric" style="border-left:3px solid var(--electric)">
+      <div class="label">Energia: Fatturato vs HA</div>
+      <div class="value" style="color:var(--electric)">
+        {{ riepilogo.tot_fatt_kwh }} <small style="font-size:.8rem;color:var(--text-muted)">/ {{ riepilogo.tot_ha_kwh }} kWh</small>
+      </div>
+      <div class="subtext">
+        Scostamento netto: 
+        <strong style="color:{% if riepilogo.delta_tot_kwh > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+          {% if riepilogo.delta_tot_kwh > 0 %}+{% endif %}{{ riepilogo.delta_tot_kwh }} kWh
+        </strong>
+      </div>
+    </div>
+
+    <div class="metric" style="border-left:3px solid var(--gas)">
+      <div class="label">Gas Metano: Fatturato vs HA</div>
+      <div class="value" style="color:var(--gas)">
+        {{ riepilogo.tot_fatt_smc }} <small style="font-size:.8rem;color:var(--text-muted)">/ {{ riepilogo.tot_ha_smc }} Smc</small>
+      </div>
+      <div class="subtext">
+        Scostamento netto: 
+        <strong style="color:{% if riepilogo.delta_tot_smc > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+          {% if riepilogo.delta_tot_smc > 0 %}+{% endif %}{{ riepilogo.delta_tot_smc }} Smc
+        </strong>
+      </div>
+    </div>
+
+    <div class="metric" style="border-left:3px solid {% if riepilogo.impatto_eur_complessivo > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+      <div class="label">Impatto Economico Stimato</div>
+      <div class="value" style="color:{% if riepilogo.impatto_eur_complessivo > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+        {% if riepilogo.impatto_eur_complessivo > 0 %}+{% endif %}{{ riepilogo.impatto_eur_complessivo }} <small>€</small>
+      </div>
+      <div class="subtext">
+        {% if riepilogo.impatto_eur_complessivo > 0 %}
+          Speso in più rispetto al contatore privato
+        {% else %}
+          Nessun sovrapprezzo anomalo rilevato
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- DUE CANALI DI ACQUISIZIONE DATI (POLLING RETE vs CARICAMENTO MANUALE CSV) -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); margin-bottom: 26px;">
+    
+    <!-- 1. Polling Automatico dalla Rete -->
+    <div class="card" style="margin-bottom:0;border-left:4px solid var(--accent)">
+      <div class="card-header" style="margin-bottom:12px">
+        <div>
+          <h2><span>🌐</span> Opzione 1: Polling REST API</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Query in tempo reale verso l'istanza HA</span>
+        </div>
+        <span class="badge info">Rete Locale</span>
+      </div>
+      <p style="color:var(--text-muted);font-size:.85rem;margin:0 0 14px;line-height:1.5">
+        Interroga direttamente Home Assistant per ciascun periodo di fatturazione leggendo lo storico delle letture del tuo sensore o pinza amperometrica.
+      </p>
+
+      <div style="background:rgba(15,23,42,0.6);padding:10px 14px;border-radius:10px;font-size:.8rem;color:var(--text-muted);margin-bottom:16px;border:1px solid var(--card-border)">
+        <div>⚡ Sensore Luce: <code>{{ cfg.ha_entity_kwh_consumo|default:"Non impostato" }}</code></div>
+        <div style="margin-top:4px">🔥 Sensore Gas: <code>{{ cfg.ha_entity_smc_consumo|default:"Non impostato" }}</code></div>
+      </div>
+
+      <form method="post" action="{% url 'confronto_ha' %}" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        {% csrf_token %}
+        <input type="hidden" name="azione" value="polling">
+        <select name="tipo" style="max-width:240px">
+          <option value="tutti">Tutte le forniture (Luce & Gas)</option>
+          <option value="luce">Solo Bollette Luce</option>
+          <option value="gas">Solo Bollette Gas</option>
+        </select>
+        <button type="submit" class="btn" {% if not riepilogo.ha_configurato %}disabled title="Configura prima URL e Token"{% endif %}>
+          🔄 Avvia Polling da HA
+        </button>
+      </form>
+    </div>
+
+    <!-- 2. Caricamento Manuale Export CSV Home Assistant -->
+    <div class="card" style="margin-bottom:0;border-left:4px solid var(--electric)">
+      <div class="card-header" style="margin-bottom:12px">
+        <div>
+          <h2><span>📁</span> Opzione 2: Import CSV Manuale</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Importazione dati offline</span>
+        </div>
+        <span class="badge electric">Offline / No Token</span>
+      </div>
+      <p style="color:var(--text-muted);font-size:.85rem;margin:0 0 14px;line-height:1.5">
+        Se non vuoi connettere la rete o hai scaricato il CSV dal cruscotto <em>Energia</em> o da <em>Strumenti sviluppatori → Statistiche</em> di Home Assistant, caricalo qui.
+      </p>
+
+      <form method="post" action="{% url 'confronto_ha' %}" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:12px">
+        {% csrf_token %}
+        <input type="hidden" name="azione" value="upload_csv">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input type="file" name="file_csv" accept=".csv,.txt" required style="flex:1">
+          <select name="tipo_predefinito" style="max-width:190px">
+            <option value="luce">Dati Elettricità (kWh)</option>
+            <option value="gas">Dati Gas Metano (Smc)</option>
+          </select>
+        </div>
+        <div>
+          <button type="submit" class="btn ghost">
+            📥 Analizza CSV ed Esegui Audit
+          </button>
+        </div>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- TABELLA DI AUDIT: CONFRONTO LUCE -->
+  <div class="card" style="border-top:3px solid var(--electric)">
+    <div class="card-header">
+      <div>
+        <h2><span>⚡</span> Audit Elettricità: Bollette vs Contatore Home Assistant</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Confronto kWh fatturati vs misurati su pinza Shelly/contatore</span>
+      </div>
+      <span class="badge electric">Tolleranza Congrua: ±3%</span>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Fornitore</th>
+            <th>Fatturato</th>
+            <th>Misurato HA</th>
+            <th>Scostamento (Δ)</th>
+            <th>Esito Congruenza</th>
+            <th>Impatto Stimato</th>
+            <th>Fonte Dati</th>
+            <th style="text-align:right">Azione</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in riepilogo.confronti_luce %}
+            <tr>
+              <td>
+                <a href="{% url 'dettaglio_bolletta_luce' c.bolletta.pk %}" style="color:var(--accent);text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:.86rem">
+                  {{ c.bolletta.periodo_inizio|date:"d/m/Y" }} → {{ c.bolletta.periodo_fine|date:"d/m/Y" }}
+                </a>
+              </td>
+              <td>
+                <span class="provider-chip">
+                  <span style="color:var(--electric)">⚡</span> {{ c.bolletta.fornitore }}
+                </span>
+              </td>
+              <td><strong>{{ c.fatturato }}</strong> <span style="color:var(--text-dim);font-size:.8rem">kWh</span></td>
+              <td>
+                {% if c.misurato_ha %}
+                  <strong style="color:var(--accent)">{{ c.misurato_ha }}</strong> <span style="color:var(--text-dim);font-size:.8rem">kWh</span>
+                {% else %}
+                  <span style="color:var(--text-dim)">Non acquisito</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if c.delta is not None %}
+                  <span style="font-weight:700;font-family:var(--font-mono);color:{% if c.delta > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+                    {% if c.delta > 0 %}+{% endif %}{{ c.delta }} kWh
+                    <small style="font-weight:500">({% if c.scostamento_pct > 0 %}+{% endif %}{{ c.scostamento_pct }}%)</small>
+                  </span>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if c.stato == 'congruo' %}
+                  <span class="badge ok">✓ Congruo</span>
+                {% elif c.stato == 'moderato' %}
+                  <span class="badge warn">⚠️ Discrepanza {{ c.scostamento_pct }}%</span>
+                {% elif c.stato == 'anomalo' %}
+                  <span class="badge off">🚨 Anomalia {{ c.scostamento_pct }}%</span>
+                {% else %}
+                  <span class="badge off">In attesa misura</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if c.impatto_eur is not None %}
+                  <strong class="price-tag" style="color:{% if c.impatto_eur > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+                    {% if c.impatto_eur > 0 %}+{% endif %}{{ c.impatto_eur }} €
+                  </strong>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                <small style="color:var(--text-dim)">{{ c.fonte }}</small>
+              </td>
+              <td style="text-align:right">
+                <form method="post" action="{% url 'confronto_ha' %}" style="display:inline;margin:0">
+                  {% csrf_token %}
+                  <input type="hidden" name="azione" value="polling">
+                  <input type="hidden" name="tipo" value="luce">
+                  <input type="hidden" name="bolletta_id" value="{{ c.bolletta.pk }}">
+                  <button type="submit" class="btn ghost btn-xs" {% if not riepilogo.ha_configurato %}disabled{% endif %}>
+                    🔄 Polling
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="9" class="empty-state" style="padding:24px">Nessuna bolletta elettrica presente in archivio.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TABELLA DI AUDIT: CONFRONTO GAS -->
+  <div class="card" style="border-top:3px solid var(--gas);margin-top:24px">
+    <div class="card-header">
+      <div>
+        <h2><span>🔥</span> Audit Gas Metano: Bollette vs Sensore Home Assistant</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Confronto metri cubi standard (Smc) fatturati vs impulsi contatore</span>
+      </div>
+      <span class="badge gas">Tolleranza Congrua: ±3%</span>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Fornitore</th>
+            <th>Fatturato</th>
+            <th>Misurato HA</th>
+            <th>Scostamento (Δ)</th>
+            <th>Esito Congruenza</th>
+            <th>Impatto Stimato</th>
+            <th>Fonte Dati</th>
+            <th style="text-align:right">Azione</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in riepilogo.confronti_gas %}
+            <tr>
+              <td>
+                <a href="{% url 'dettaglio_bolletta_gas' c.bolletta.pk %}" style="color:var(--accent);text-decoration:none;font-weight:700;font-family:var(--font-mono);font-size:.86rem">
+                  {{ c.bolletta.periodo_inizio|date:"d/m/Y" }} → {{ c.bolletta.periodo_fine|date:"d/m/Y" }}
+                </a>
+              </td>
+              <td>
+                <span class="provider-chip">
+                  <span style="color:var(--gas)">🔥</span> {{ c.bolletta.fornitore }}
+                </span>
+              </td>
+              <td><strong>{{ c.fatturato }}</strong> <span style="color:var(--text-dim);font-size:.8rem">Smc</span></td>
+              <td>
+                {% if c.misurato_ha %}
+                  <strong style="color:var(--gas)">{{ c.misurato_ha }}</strong> <span style="color:var(--text-dim);font-size:.8rem">Smc</span>
+                {% else %}
+                  <span style="color:var(--text-dim)">Non acquisito</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if c.delta is not None %}
+                  <span style="font-weight:700;font-family:var(--font-mono);color:{% if c.delta > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+                    {% if c.delta > 0 %}+{% endif %}{{ c.delta }} Smc
+                    <small style="font-weight:500">({% if c.scostamento_pct > 0 %}+{% endif %}{{ c.scostamento_pct }}%)</small>
+                  </span>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                {% if c.stato == 'congruo' %}
+                  <span class="badge ok">✓ Congruo</span>
+                {% elif c.stato == 'moderato' %}
+                  <span class="badge warn">⚠️ Discrepanza {{ c.scostamento_pct }}%</span>
+                {% elif c.stato == 'anomalo' %}
+                  <span class="badge off">🚨 Anomalia {{ c.scostamento_pct }}%</span>
+                {% else %}
+                  <span class="badge off">In attesa misura</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if c.impatto_eur is not None %}
+                  <strong class="price-tag" style="color:{% if c.impatto_eur > 0 %}var(--warn){% else %}var(--ok){% endif %}">
+                    {% if c.impatto_eur > 0 %}+{% endif %}{{ c.impatto_eur }} €
+                  </strong>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                <small style="color:var(--text-dim)">{{ c.fonte }}</small>
+              </td>
+              <td style="text-align:right">
+                <form method="post" action="{% url 'confronto_ha' %}" style="display:inline;margin:0">
+                  {% csrf_token %}
+                  <input type="hidden" name="azione" value="polling">
+                  <input type="hidden" name="tipo" value="gas">
+                  <input type="hidden" name="bolletta_id" value="{{ c.bolletta.pk }}">
+                  <button type="submit" class="btn ghost btn-xs" {% if not riepilogo.ha_configurato %}disabled{% endif %}>
+                    🔄 Polling
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="9" class="empty-state" style="padding:24px">Nessuna bolletta gas presente in archivio.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+{% endblock %}

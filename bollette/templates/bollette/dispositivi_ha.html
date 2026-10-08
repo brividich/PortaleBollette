@@ -1,0 +1,547 @@
+{% extends "bollette/base.html" %}
+
+{% block title %}Monitoraggio Dispositivi & Home Assistant — Portale Bollette{% endblock %}
+
+{% block content %}
+
+  <!-- Header Navigazione & Stato Bridge HA -->
+  <div class="card-header" style="margin-bottom:20px;flex-wrap:wrap;gap:14px">
+    <div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <h1 style="font-size:1.55rem;font-weight:800;margin:0;letter-spacing:-0.02em">
+          🔌 Telemetria Dispositivi & Home Assistant
+        </h1>
+        {% if telemetria.online %}
+          <span class="badge ok">
+            <span class="pulse-dot"></span> HA Online ({{ cfg.ha_base_url|default:"192.168.1.206:8123" }})
+          </span>
+        {% else %}
+          <a href="{% url 'configurazioni' %}" class="badge warn" style="text-decoration:none">
+            ⚠️ Bridge HA Disconnesso (Configura Token)
+          </a>
+        {% endif %}
+      </div>
+      <span style="color:var(--text-muted);font-size:.88rem">
+        Telemetria in tempo reale, consumi cumulativi per apparecchio, stima costi con tariffa marginale e controllo smart plug.
+      </span>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <form method="post" action="{% url 'sincronizzazione_bidirezionale' %}" style="margin:0">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="background:linear-gradient(135deg,#0284c7,#38bdf8);color:#080d1a">
+          ⚡ Sincronizza Tariffe HA
+        </button>
+      </form>
+      <button type="button" class="btn ghost" onclick="ricaricaMisureLive()" id="btnRicarica">
+        🔄 Aggiorna Live
+      </button>
+      <a href="{% url 'confronto_ha' %}" class="btn ghost">
+        🔍 Audit Bollette vs HA →
+      </a>
+    </div>
+  </div>
+
+  <!-- Barra Sotto-Navigazione Hub HA -->
+  <div class="sub-nav">
+    <a href="{% url 'dispositivi_ha' %}" class="active">🔌 Dispositivi & Live Metering</a>
+    <a href="{% url 'confronto_ha' %}">🔍 Audit Congruenza Bollette</a>
+    <a href="{% url 'netatmo_dashboard' %}">🔥 Netatmo Riscaldamento</a>
+    <button type="button" onclick="openDiscoveryModal()">📡 Sensori Rilevati HA</button>
+  </div>
+
+  <!-- 4 KPI PRINCIPALI: POTENZA, MONITORAGGIO, CONSUMI MESE, COSTI -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 24px;">
+    
+    <!-- Potenza Casa Istantanea -->
+    <div class="metric" style="border-left:3px solid var(--accent)">
+      <div class="label" style="display:flex;justify-content:space-between">
+        <span>Potenza Casa (Live)</span>
+        <span style="color:var(--ok);font-size:.72rem">● Rete</span>
+      </div>
+      <div class="value" id="valPotenzaTotale" style="color:var(--accent)">
+        {{ breakdown.baseload.potenza_totale_casa_w|default:0|floatformat:0 }} <small style="font-size:.85rem;color:var(--text-muted)">W</small>
+      </div>
+      <div class="subtext">
+        Assorbimento istantaneo al contatore generale
+      </div>
+    </div>
+
+    <!-- Carichi Monitorati vs Copertura -->
+    <div class="metric" style="border-left:3px solid #818cf8">
+      <div class="label" style="display:flex;justify-content:space-between">
+        <span>Carichi Tracciati</span>
+        <span class="badge info" style="font-size:.68rem;padding:1px 6px">{{ breakdown.baseload.pct_copertura }}% coperti</span>
+      </div>
+      <div class="value" id="valPotenzaMonitorata" style="color:#818cf8">
+        {{ breakdown.baseload.potenza_monitorata_w|floatformat:0 }} <small style="font-size:.85rem;color:var(--text-muted)">W</small>
+      </div>
+      <div class="subtext">
+        Standby/altro non tracciato: <strong style="color:var(--text)">{{ breakdown.baseload.potenza_standby_w|floatformat:0 }} W</strong>
+      </div>
+    </div>
+
+    <!-- Consumo Cumulativo Mese -->
+    <div class="metric" style="border-left:3px solid var(--electric)">
+      <div class="label">Consumo Apparecchi Mese</div>
+      <div class="value" style="color:var(--electric)">
+        {{ breakdown.totale_kwh|floatformat:1 }} <small style="font-size:.85rem;color:var(--text-muted)">kWh</small>
+      </div>
+      <div class="subtext">
+        Periodo dal {{ breakdown.periodo_inizio }} al {{ breakdown.periodo_fine }}
+      </div>
+    </div>
+
+    <!-- Spesa Stimata Carichi Mese -->
+    <div class="metric" style="border-left:3px solid var(--ok)">
+      <div class="label">Spesa Stimata Mese</div>
+      <div class="value" style="color:var(--ok)">
+        {{ breakdown.totale_costo_eur|floatformat:2 }} <small style="font-size:.85rem;color:var(--text-muted)">€</small>
+      </div>
+      <div class="subtext">
+        Tariffa applicata: <strong style="color:var(--text)">{{ breakdown.baseload.tariffa_kwh_applicata }} €/kWh</strong>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOX ANALISI BASELOAD & STANDBY (VAMPIRE DRAW) -->
+  <div class="card" style="margin-bottom:24px;border-left:4px solid var(--accent)">
+    <div class="card-header" style="margin-bottom:12px">
+      <div>
+        <h2><span>⚡</span> Analisi Assorbimento di Fondo & Vampire Draw</h2>
+        <span style="font-size:.8rem;color:var(--text-muted)">Disaggregazione potenza attiva e carichi fantasma</span>
+      </div>
+      <span class="badge info">Precisione Impianto: {{ breakdown.baseload.pct_copertura }}%</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px">
+        <p style="color:var(--text-muted);font-size:.86rem;margin:0 0 12px;line-height:1.5">
+          Su una potenza istantanea totale di <strong style="color:var(--text)">{{ breakdown.baseload.potenza_totale_casa_w }} W</strong>, 
+          i tuoi Shelly e misuratori tracciano puntualmente <strong style="color:var(--accent)">{{ breakdown.baseload.potenza_monitorata_w }} W</strong>.
+          {% if breakdown.baseload.potenza_standby_w <= 15 %}
+            <span style="color:var(--ok)">✓ Eccellente: quasi il 100% dell'energia consumata in casa è perfettamente identificato e associato a un dispositivo specifico!</span>
+          {% else %}
+            <span>Il consumo di fondo (standby / circuiti non sezionati) è stimato in <strong>{{ breakdown.baseload.potenza_standby_w }} W</strong>.</span>
+          {% endif %}
+        </p>
+        <!-- Barra di copertura visiva -->
+        <div style="width:100%;height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden">
+          <div style="width:{{ breakdown.baseload.pct_copertura }}%;height:100%;background:linear-gradient(90deg,#38bdf8,#818cf8);border-radius:4px"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div style="background:rgba(255,255,255,0.03);padding:10px 16px;border-radius:12px;border:1px solid var(--card-border);text-align:center">
+          <div style="font-size:.7rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Consumo Standby</div>
+          <div style="font-size:1.15rem;font-weight:800;color:var(--electric);font-family:var(--font-mono)">
+            ≈ {{ breakdown.baseload.potenza_standby_w|default:0|floatformat:0 }} W
+          </div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);padding:10px 16px;border-radius:12px;border:1px solid var(--card-border);text-align:center">
+          <div style="font-size:.7rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Dispositivi Mappati</div>
+          <div style="font-size:1.15rem;font-weight:800;color:var(--accent)">
+            {{ breakdown.carichi|length }} utenze
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEZIONE CLIMATE & COMFORT SMART (TERMOSTATO NETATMO + CLIMA HA) -->
+  {% if climate_devices %}
+  <div style="margin-bottom:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="font-size:1.15rem;font-weight:700;margin:0;display:flex;align-items:center;gap:8px">
+        <span>🌡️</span> Termostati & Climatizzazione (Home Assistant)
+      </h2>
+      <form method="post" action="{% url 'netatmo_sync_ha' %}" style="margin:0">
+        {% csrf_token %}
+        <button type="submit" class="btn ghost btn-xs">
+          🔥 Sincronizza Misure Termostato da HA
+        </button>
+      </form>
+    </div>
+
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px">
+      {% for dev in climate_devices %}
+      <div class="card" style="margin-bottom:0;position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="font-size:1.6rem">{{ dev.icona }}</div>
+            <div>
+              <strong style="font-size:1rem;color:var(--text);display:block">{{ dev.nome }}</strong>
+              <small style="color:var(--text-muted);font-size:.75rem">{{ dev.sottotitolo }}</small>
+            </div>
+          </div>
+          <div>
+            {% if dev.is_heating %}
+              <span class="badge gas">🔥 In Riscaldamento</span>
+            {% elif dev.is_cooling %}
+              <span class="badge info">❄️ Raffrescamento</span>
+            {% elif dev.is_idle %}
+              <span class="badge ok">✓ Standby</span>
+            {% else %}
+              <span class="badge off">{{ dev.state|upper }}</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns: 1fr 1fr;gap:10px;margin-bottom:14px;background:rgba(255,255,255,0.02);padding:10px;border-radius:10px">
+          <div>
+            <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Temperatura Ambiente</div>
+            <div style="font-size:1.5rem;font-weight:800;color:var(--accent);font-family:var(--font-display)">
+              {{ dev.current_temperature|default:"—" }} <small style="font-size:.8rem;color:var(--text-muted)">°C</small>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;font-weight:700">Setpoint Target</div>
+            <div style="font-size:1.5rem;font-weight:800;color:var(--text);font-family:var(--font-display)">
+              <span id="setpoint-{{ dev.entity_id }}">{{ dev.target_temperature|default:"—" }}</span> <small style="font-size:.8rem;color:var(--text-muted)">°C</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- Azioni Setpoint Rapide per il Clima -->
+        {% if dev.target_temperature %}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="font-size:.78rem;color:var(--text-muted)">Regola Setpoint:</span>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="btn ghost btn-xs" onclick="regolaClima('{{ dev.entity_id }}', -0.5)">
+              -0.5 °C
+            </button>
+            <button type="button" class="btn ghost btn-xs" onclick="regolaClima('{{ dev.entity_id }}', 0.5)">
+              +0.5 °C
+            </button>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- GRAFICI ANALITICI: RIPARTIZIONE CATEGORIA (DONUT) & TOP CARICHI (BAR CHART) -->
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); margin-bottom: 24px;">
+    
+    <!-- Donut Chart: Categorie -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header" style="margin-bottom:12px">
+        <div>
+          <h2><span>🥧</span> Ripartizione per Categoria</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Assorbimento mensile per tipologia</span>
+        </div>
+        <span class="badge info">Mese in Corso</span>
+      </div>
+      <div style="position:relative;height:260px;display:flex;align-items:center;justify-content:center">
+        <canvas id="chartCategorie"></canvas>
+      </div>
+      <!-- Tabellina rapida categorie -->
+      <div style="margin-top:14px;display:grid;grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));gap:6px">
+        {% for cat in breakdown.categorie %}
+          <div style="background:rgba(255,255,255,0.02);padding:6px 10px;border-radius:8px;border-left:3px solid {{ cat.colore }};border:1px solid var(--card-border)">
+            <span style="font-size:.72rem;color:var(--text-muted);display:block">{{ cat.nome }}</span>
+            <strong style="font-size:.85rem;color:var(--text)">{{ cat.kwh }} kWh</strong>
+            <small style="color:var(--text-dim);font-size:.7rem">({{ cat.costo_eur }} €)</small>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Bar Chart: Top Elettrodomestici -->
+    <div class="card" style="margin-bottom:0">
+      <div class="card-header" style="margin-bottom:12px">
+        <div>
+          <h2><span>📊</span> Classifica Elettrodomestici (kWh)</h2>
+          <span style="font-size:.8rem;color:var(--text-muted)">Consumo cumulativo per singolo apparecchio</span>
+        </div>
+        <span class="badge electric">Top Carichi</span>
+      </div>
+      <div style="position:relative;height:260px">
+        <canvas id="chartCarichi"></canvas>
+      </div>
+      <div style="font-size:.78rem;color:var(--text-muted);margin-top:14px;text-align:right">
+        Tariffa marginale applicata: <strong class="price-tag" style="color:var(--electric)">{{ breakdown.baseload.tariffa_kwh_applicata }} €/kWh</strong>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- GRIGLIA COMPLETA DISPOSITIVI & CONTROLLO PRESE SMART -->
+  <div class="card">
+    <div class="card-header" style="margin-bottom:18px">
+      <div>
+        <h2 style="margin:0;font-size:1.25rem;display:flex;align-items:center;gap:8px">
+          <span>🔌</span> Apparecchiature Monitorate & Prese Smart ({{ breakdown.carichi|length }})
+        </h2>
+        <span style="color:var(--text-muted);font-size:.82rem">
+          Monitoraggio continuo carichi via pinze Shelly EM / 1PM e sensori dedicati. I valori in Watt si aggiornano automaticamente ogni 12 secondi.
+        </span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px;">
+      {% for c in breakdown.carichi %}
+      <div class="card" id="card-{{ c.id }}" style="margin-bottom:0;background:rgba(15,23,42,0.6);border:1px solid var(--card-border);border-top:3px solid {{ c.colore }};padding:16px;display:flex;flex-direction:column;justify-content:space-between;transition:transform .2s">
+        
+        <!-- Header Dispositivo -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:1.5rem">{{ c.icon }}</span>
+              <div>
+                <strong style="font-size:.95rem;color:var(--text);display:block" title="{{ c.nome }}">{{ c.nome }}</strong>
+                <span class="badge" style="font-size:.68rem;padding:1px 6px;background:rgba(255,255,255,0.05);color:{{ c.colore }}">
+                  {{ c.categoria }}
+                </span>
+              </div>
+            </div>
+            
+            <!-- Badge Potenza Live con indicatore attivo -->
+            <div style="text-align:right">
+              <span id="badge-potenza-{{ c.id }}" class="badge {% if c.is_active %}ok{% else %}off{% endif %}" style="font-size:.78rem;font-family:var(--font-mono)">
+                <span id="potenza-val-{{ c.id }}">{{ c.potenza_w|floatformat:1 }}</span> W
+              </span>
+            </div>
+          </div>
+
+          <p style="color:var(--text-muted);font-size:.78rem;margin:0 0 12px;line-height:1.4">
+            {{ c.descrizione }}
+          </p>
+        </div>
+
+        <!-- Metriche Energetiche & Costo -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+            <span style="font-size:.78rem;color:var(--text-muted)">Consumo Mese:</span>
+            <strong style="font-size:.98rem;color:var(--text);font-family:var(--font-mono)">
+              {{ c.kwh }} <small style="font-size:.72rem;color:var(--text-muted)">kWh</small>
+            </strong>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+            <span style="font-size:.78rem;color:var(--text-muted)">Costo Stimato Mese:</span>
+            <strong class="price-tag" style="font-size:1rem;color:var(--ok)">
+              {{ c.costo_eur }} <small style="font-size:.72rem">€</small>
+            </strong>
+          </div>
+
+          <!-- Barra percentuale carico -->
+          <div style="width:100%;height:5px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-bottom:12px">
+            <div style="width:{{ c.pct }}%;height:100%;background:{{ c.colore }};border-radius:3px"></div>
+          </div>
+
+          <!-- Footer con Switch / Info -->
+          <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.05);padding-top:10px">
+            <span style="font-size:.74rem;color:var(--text-muted)">
+              Quota: <strong>{{ c.pct }}%</strong>
+            </span>
+
+            {% if c.switch_entity %}
+              <!-- Tasto Switch Presa Smart -->
+              <div style="display:flex;align-items:center;gap:6px">
+                <span id="label-switch-{{ c.id }}" style="font-size:.74rem;font-weight:700;color:{% if c.switch_state == 'on' %}var(--ok){% else %}var(--text-dim){% endif %}">
+                  {% if c.switch_state == 'on' %}ACCESA{% else %}SPENTA{% endif %}
+                </span>
+                <button type="button" class="btn {% if c.switch_state == 'on' %}ghost{% else %}ok{% endif %} btn-xs" 
+                        id="btn-switch-{{ c.id }}"
+                        onclick="togglePresaSmart('{{ c.switch_entity }}', '{{ c.id }}')">
+                  {% if c.switch_state == 'on' %}Spegni{% else %}Accendi{% endif %}
+                </button>
+              </div>
+            {% else %}
+              <small style="font-size:.7rem;color:var(--text-dim)">Misurazione Fissa</small>
+            {% endif %}
+          </div>
+        </div>
+
+      </div>
+      {% empty %}
+      <div class="empty-state" style="grid-column:1/-1">Nessun carico monitorato disponibile in Home Assistant.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- SCRIPT CHART.JS & LIVE POLLING -->
+  <script>
+    // Dati Grafico Categorie
+    const catLabels = {{ chart_cat_labels_json|safe }};
+    const catKwh = {{ chart_cat_kwh_json|safe }};
+    const catColors = {{ chart_cat_colors_json|safe }};
+
+    if (catLabels.length > 0) {
+      new Chart(document.getElementById('chartCategorie'), {
+        type: 'doughnut',
+        data: {
+          labels: catLabels,
+          datasets: [{
+            data: catKwh,
+            backgroundColor: catColors,
+            borderColor: '#0b101b',
+            borderWidth: 2,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11 } }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) {
+                  return `${ctx.label}: ${ctx.raw} kWh`;
+                }
+              }
+            }
+          },
+          cutout: '68%'
+        }
+      });
+    }
+
+    // Dati Grafico Carichi Bar Chart
+    const devLabels = {{ chart_dev_labels_json|safe }};
+    const devKwh = {{ chart_dev_kwh_json|safe }};
+    const devColors = {{ chart_dev_colors_json|safe }};
+
+    if (devLabels.length > 0) {
+      new Chart(document.getElementById('chartCarichi'), {
+        type: 'bar',
+        data: {
+          labels: devLabels,
+          datasets: [{
+            label: 'Consumo Mese (kWh)',
+            data: devKwh,
+            backgroundColor: devColors,
+            borderRadius: 6,
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) {
+                  return `${ctx.raw} kWh`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: '#94a3b8' }
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#f1f5f9', font: { size: 11 } }
+            }
+          }
+        }
+      });
+    }
+
+    // Funzione Controllo Presa Smart (AJAX)
+    async function togglePresaSmart(entityId, devId) {
+      const btn = document.getElementById(`btn-switch-${devId}`);
+      const label = document.getElementById(`label-switch-${devId}`);
+      if (btn) btn.disabled = true;
+
+      try {
+        const resp = await fetch("{% url 'ha_toggle_device_api' %}", {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+          },
+          body: JSON.stringify({ entity_id: entityId })
+        });
+        const res = await resp.json();
+        if (res.ok) {
+          const isNowOn = res.new_state === 'on';
+          if (label) {
+            label.textContent = isNowOn ? 'ACCESA' : 'SPENTA';
+            label.style.color = isNowOn ? 'var(--ok)' : 'var(--text-dim)';
+          }
+          if (btn) {
+            btn.textContent = isNowOn ? 'Spegni' : 'Accendi';
+            btn.className = isNowOn ? 'btn ghost btn-xs' : 'btn ok btn-xs';
+          }
+        } else {
+          alert('Errore durante il comando alla presa smart: ' + (res.errore || 'Timeout'));
+        }
+      } catch (err) {
+        console.error('Errore chiamata toggle:', err);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    // Funzione Regolazione Setpoint Clima (AJAX)
+    async function regolaClima(entityId, delta) {
+      const span = document.getElementById(`setpoint-${entityId}`);
+      let currentVal = parseFloat(span ? span.textContent : '20.0') || 20.0;
+      let targetVal = Math.round((currentVal + delta) * 2) / 2;
+
+      try {
+        const resp = await fetch("{% url 'ha_climate_control_api' %}", {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+          },
+          body: JSON.stringify({ entity_id: entityId, temperature: targetVal })
+        });
+        const res = await resp.json();
+        if (res.ok && span) {
+          span.textContent = targetVal.toFixed(1);
+        }
+      } catch (err) {
+        console.error('Errore impostazione clima:', err);
+      }
+    }
+
+    // Polling periodico per aggiornare Watt live (ogni 12s)
+    async function ricaricaMisureLive() {
+      const btn = document.getElementById('btnRicarica');
+      if (btn) btn.textContent = '⏳ Lettura...';
+
+      try {
+        const resp = await fetch("{% url 'ha_device_breakdown_api' %}");
+        if (resp.ok) {
+          const dati = await resp.json();
+          if (dati.baseload) {
+            const elTot = document.getElementById('valPotenzaTotale');
+            if (elTot) elTot.innerHTML = `${Math.round(dati.baseload.potenza_totale_casa_w)} <small style="font-size:.85rem;color:var(--text-muted)">W</small>`;
+            const elMon = document.getElementById('valPotenzaMonitorata');
+            if (elMon) elMon.innerHTML = `${Math.round(dati.baseload.potenza_monitorata_w)} <small style="font-size:.85rem;color:var(--text-muted)">W</small>`;
+          }
+          if (dati.carichi) {
+            dati.carichi.forEach(c => {
+              const elVal = document.getElementById(`potenza-val-${c.id}`);
+              const badge = document.getElementById(`badge-potenza-${c.id}`);
+              if (elVal) elVal.textContent = c.potenza_w.toFixed(1);
+              if (badge) {
+                badge.className = c.potenza_w > 5.0 ? 'badge ok' : 'badge off';
+              }
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Polling live non riuscito:', err);
+      } finally {
+        if (btn) btn.textContent = '🔄 Aggiorna Live';
+      }
+    }
+
+    // Avvio polling live ogni 12 secondi
+    setInterval(ricaricaMisureLive, 12000);
+  </script>
+
+{% endblock %}
