@@ -104,6 +104,216 @@ class AceaParser(BaseProviderParser):
             return m.group(1).strip()
         return super().extract_numero_fattura(testo)
 
+    def extract_totale(self, testo: str, prima_pagina: str = "") -> Decimal | None:
+        """
+        Estrae il totale bolletta Acea, dando priorità assoluta a 'TOTALE BOLLETTA'
+        (esclude il canone RAI addebitato in 'TOTALE DA PAGARE').
+        """
+        m_bolletta = re.search(
+            r"TOTALE\s+BOLLETTA[^0-9€\-]*€?\s*([0-9]{1,4}[.,][0-9]{2})|([0-9]{1,4}[.,][0-9]{2})\s*€?\s*(?:TOTALE\s+BOLLETTA)",
+            testo,
+            re.IGNORECASE,
+        )
+        if m_bolletta:
+            val_str = m_bolletta.group(1) or m_bolletta.group(2)
+            val = self.parse_numero(val_str)
+            if val is not None and val > 0:
+                return val
+        return super().extract_totale(testo, prima_pagina)
+
+    def extract_scontrino(self, testo: str) -> dict[str, Decimal | None]:
+        """
+        Estrae le voci economiche chiave dallo 'Scontrino dell'energia':
+        - Quota fissa periodo
+        - Quota potenza periodo
+        - Quota fissa netta complessiva (fissa + potenza)
+        - Canone abbonamento TV / RAI
+        - TOTALE BOLLETTA (senza canone)
+        - TOTALE DA PAGARE (con canone)
+        """
+        risultato: dict[str, Decimal | None] = {
+            "quota_fissa": None,
+            "quota_potenza": None,
+            "quota_fissa_netta_periodo": None,
+            "canone_rai": None,
+            "totale_bolletta": None,
+            "totale_da_pagare": None,
+        }
+
+        # Quota fissa (es. "Quota fissa 2 mesi 14,020000 €/mese 28,04 €" o "Quota fissa ... 28,04 €")
+        m_qf = re.search(r"Quota\s+fissa\b[^\n]*?([0-9]+[.,][0-9]{2})\s*€", testo, re.IGNORECASE)
+        if m_qf:
+            risultato["quota_fissa"] = self.parse_numero(m_qf.group(1))
+
+        # Quota potenza (es. "Quota potenza 3,000 kW per 2 mesi 1,976667 €/kW 11,86 €")
+        m_qp = re.search(r"Quota\s+potenza\b[^\n]*?([0-9]+[.,][0-9]{2})\s*€", testo, re.IGNORECASE)
+        if m_qp:
+            risultato["quota_potenza"] = self.parse_numero(m_qp.group(1))
+
+        # Somma quota fissa netta periodo
+        qf = risultato["quota_fissa"] or Decimal("0")
+        qp = risultato["quota_potenza"] or Decimal("0")
+        if risultato["quota_fissa"] is not None or risultato["quota_potenza"] is not None:
+            risultato["quota_fissa_netta_periodo"] = qf + qp
+
+        # Canone RAI
+        m_rai = re.search(
+            r"(?:Canone\s+di\s+abbonamento\s+alla\s+televisione|Canone\s+TV|Canone\s+RAI)[^\n0-9€\-]*€?\s*([0-9]+[.,][0-9]{2})",
+            testo,
+            re.IGNORECASE,
+        )
+        if m_rai:
+            risultato["canone_rai"] = self.parse_numero(m_rai.group(1))
+
+        # TOTALE BOLLETTA
+        m_tb = re.search(r"TOTALE\s+BOLLETTA[^0-9€\-]*€?\s*([0-9]{1,4}[.,][0-9]{2})", testo, re.IGNORECASE)
+        if m_tb:
+            risultato["totale_bolletta"] = self.parse_numero(m_tb.group(1))
+
+        # TOTALE DA PAGARE
+        m_tp = re.search(
+            r"(?:TOTALE\s+DA\s+PAGARE|Importo\s+totale\s+da\s+pagare)[^0-9€\-]*€?\s*([0-9]{1,4}[.,][0-9]{2})",
+            testo,
+            re.IGNORECASE,
+        )
+        if m_tp:
+            risultato["totale_da_pagare"] = self.parse_numero(m_tp.group(1))
+
+        return risultato
+
+    def extract_letture_e_consumi(self, testo: str) -> list[dict[str, Any]]:
+        """
+        Estrae i consumi mensili disaggregati dalla sezione 'LETTURE E CONSUMI' di Acea.
+        Per ciascun blocco 'Attiva GG/MM/AA GG/MM/AA Rilevato/Stimato' somma i kWh
+        delle fasce F1..F6 di tipo 'Effettivo' o 'Stimato'.
+        IGNORA le righe cumulative 'Fatturato'.
+        Prende solo l'ultimo valore 'NN kWh' della riga (il punto nelle letture è separatore migliaia).
+        """
+        blocchi: list[dict[str, Any]] = []
+
+        # Trova tutte le intestazioni dei blocchi di rilevazione
+        pattern_header = re.compile(
+            r"Attiva\s+([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})\s+([0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})\s+(Rilevato|Stimato)",
+            re.IGNORECASE,
+        )
+        matches = list(pattern_header.finditer(testo))
+        if not matches:
+            return blocchi
+
+        # Regex per la singola riga di fascia F1..F6 (ignora esplicitamente Fatturato)
+        pattern_riga = re.compile(
+            r"\bF[1-6]\b[^\n]*?\b(Effettivo|Stimato)\b[^\n]*?([0-9]+(?:\.[0-9]{3})*)\s*kWh",
+            re.IGNORECASE,
+        )
+
+        for i, m in enumerate(matches):
+            inizio_str = m.group(1)
+            fine_str = m.group(2)
+            d_ini = self.parse_data(inizio_str)
+            d_fin = self.parse_data(fine_str)
+
+            start_pos = m.end()
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(testo)
+            blocco_testo = testo[start_pos:end_pos]
+
+            righe_match = list(pattern_riga.finditer(blocco_testo))
+            if not righe_match:
+                continue
+
+            kwh_totale_blocco = 0
+            tipi_trovati = set()
+
+            for rm in righe_match:
+                tipo_riga = rm.group(1).capitalize()
+                tipi_trovati.add(tipo_riga)
+                kwh_str = rm.group(2).replace(".", "")
+                try:
+                    kwh_totale_blocco += int(kwh_str)
+                except ValueError:
+                    pass
+
+            tipo_blocco = "Stimato" if "Stimato" in tipi_trovati else "Effettivo"
+
+            if d_ini and d_fin and kwh_totale_blocco > 0:
+                blocchi.append({
+                    "inizio": d_ini.isoformat(),
+                    "fine": d_fin.isoformat(),
+                    "kwh": kwh_totale_blocco,
+                    "tipo": tipo_blocco,
+                })
+
+        return blocchi
+
+    def extract_box_offerta(self, testo: str) -> dict[str, Any]:
+        """
+        Riconosce le due varianti di box offerta Acea:
+        1. 'Componente energia + dispacciamento' (fino ad aprile 2026)
+        2. 'Corrispettivo per il consumo + CDISPD' (da maggio 2026, delibera ARERA 386/2025)
+        """
+        m_var1 = re.search(
+            r"(Componente\s+energia\s*\+\s*dispacciamento)[^\n0-9€]*([0-9]+[.,][0-9]{3,6})?",
+            testo,
+            re.IGNORECASE,
+        )
+        if m_var1:
+            val = self.parse_numero(m_var1.group(2)) if m_var1.group(2) else None
+            return {
+                "trovato": True,
+                "variante": "pre_maggio_2026",
+                "etichetta": "Componente energia + dispacciamento",
+                "valore": val,
+            }
+
+        m_var2 = re.search(
+            r"(Corrispettivo\s+per\s+il\s+consumo\s*\+\s*CDISPD)[^\n0-9€]*([0-9]+[.,][0-9]{3,6})?",
+            testo,
+            re.IGNORECASE,
+        )
+        if m_var2:
+            val = self.parse_numero(m_var2.group(2)) if m_var2.group(2) else None
+            return {
+                "trovato": True,
+                "variante": "arera_386_2025",
+                "etichetta": "Corrispettivo per il consumo + CDISPD",
+                "valore": val,
+            }
+
+        return {"trovato": False, "variante": "", "etichetta": "", "valore": None}
+
+    def parse(self, testo: str, pagine: list[str] | None = None) -> dict[str, Any]:
+        """Esegue il parsing specializzato per Acea Energia integrando scontrino e consumi mensili."""
+        dati = super().parse(testo, pagine)
+
+        # 1. Scontrino dell'energia
+        scontrino = self.extract_scontrino(testo)
+        dati["scontrino"] = scontrino
+        if scontrino.get("totale_bolletta") is not None:
+            dati["importo_totale"] = scontrino["totale_bolletta"]
+            dati["totale_bolletta"] = scontrino["totale_bolletta"]
+        if scontrino.get("totale_da_pagare") is not None:
+            dati["totale_da_pagare"] = scontrino["totale_da_pagare"]
+        if scontrino.get("quota_fissa_netta_periodo") is not None:
+            dati["quota_fissa_netta_periodo"] = scontrino["quota_fissa_netta_periodo"]
+        if scontrino.get("canone_rai") is not None:
+            dati["canone_rai"] = scontrino["canone_rai"]
+
+        # 2. Letture e consumi mensili disaggregati
+        mensili = self.extract_letture_e_consumi(testo)
+        if mensili:
+            dati["consumi_mensili"] = mensili
+            dati["consumo"] = sum(m["kwh"] for m in mensili)
+
+        # 3. Riconoscimento box offerta (varianti ARERA)
+        box = self.extract_box_offerta(testo)
+        dati["box_offerta"] = box
+        if box.get("trovato") and box.get("valore") is not None:
+            dati["prezzo_offerta"] = box["valore"]
+
+        dati["score"] = self.calcola_score(dati)
+        dati["campi_estratti"] = self.calcola_campi_estratti(dati)
+        dati["campi_mancanti"] = self.calcola_campi_mancanti(dati)
+        return dati
+
 
 class A2AParser(BaseProviderParser):
     """Parser specializzato per A2A Energia."""

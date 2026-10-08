@@ -438,6 +438,18 @@ def importa_file_singolo(file_obj, nome_file: str, sovrascrivi: bool = False) ->
             }
 
         kwh = int(dati.get("consumo") or 0)
+        c_mensili = dati.get("consumi_mensili")
+        qf_netta = dati.get("quota_fissa_netta_periodo")
+        t_pagare = dati.get("totale_da_pagare")
+        c_rai = dati.get("canone_rai")
+
+        # Quota fissa mensile desunta se presente quota fissa netta di periodo
+        qf_mensile = Decimal("9.50")
+        if qf_netta:
+            giorni = max(1, (p_fine - p_inizio).days + 1)
+            mesi = max(Decimal("1"), (Decimal(giorni) / Decimal("30.417")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            qf_mensile = (Decimal(str(qf_netta)) / mesi).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
         if not esistente:
             b = BollettaElettrica(
                 fornitore=fornitore,
@@ -450,7 +462,11 @@ def importa_file_singolo(file_obj, nome_file: str, sovrascrivi: bool = False) ->
                 importo_totale=Decimal(str(totale)) if totale is not None else None,
                 prezzo_marginale_base=Decimal("0.175000"),
                 accisa_marginale=Decimal("0.022700"),
-                quota_fissa_mensile=Decimal("9.50"),
+                quota_fissa_mensile=qf_mensile,
+                consumi_mensili=c_mensili,
+                quota_fissa_netta_periodo=Decimal(str(qf_netta)) if qf_netta is not None else None,
+                totale_da_pagare=Decimal(str(t_pagare)) if t_pagare is not None else None,
+                canone_rai=Decimal(str(c_rai)) if c_rai is not None else None,
             )
         else:
             b = esistente
@@ -464,6 +480,15 @@ def importa_file_singolo(file_obj, nome_file: str, sovrascrivi: bool = False) ->
             b.kwh_fatturati = kwh
             if totale is not None:
                 b.importo_totale = Decimal(str(totale))
+            if c_mensili is not None:
+                b.consumi_mensili = c_mensili
+            if qf_netta is not None:
+                b.quota_fissa_netta_periodo = Decimal(str(qf_netta))
+                b.quota_fissa_mensile = qf_mensile
+            if t_pagare is not None:
+                b.totale_da_pagare = Decimal(str(t_pagare))
+            if c_rai is not None:
+                b.canone_rai = Decimal(str(c_rai))
 
         b.file_bolletta.save(nome_file, file_obj, save=False)
         b.save()

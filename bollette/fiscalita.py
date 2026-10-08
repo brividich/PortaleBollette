@@ -23,8 +23,13 @@ Pendenza marginale: 0 se k ≤ F; 1 se F < k ≤ T; 2 se T < k < T+F; 1 se k ≥
 """
 from __future__ import annotations
 
+import calendar
+import logging
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Sequence
+from typing import Any, Sequence
+
+logger = logging.getLogger("bollette.fiscalita")
 
 # Parametri di default del modello fiscale
 DEFAULT_FRANCHIGIA_KWH = Decimal("150")
@@ -220,3 +225,97 @@ def quota_fissa_giornaliera(
     aliquota_iva = _to_decimal(iva)
     quota_lorda = q_netta * (Decimal("1") + aliquota_iva)
     return (quota_lorda / Decimal(giorni)).quantize(TRE_DECIMALI, rounding=ROUND_HALF_UP)
+
+
+def _to_date_pure(val: Any) -> date | None:
+    """Converte un valore in oggetto date (formati ISO YYYY-MM-DD o IT DD/MM/YYYY)."""
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        val = val.strip()
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(val, fmt).date()
+            except ValueError:
+                pass
+    return None
+
+
+def _spezza_periodo_in_mesi_solari(d_ini: date, d_fin: date) -> list[tuple[date, date]]:
+    """Suddivide un intervallo temporale arbitrario in segmenti di mese solare."""
+    mesi: list[tuple[date, date]] = []
+    curr = d_ini
+    while curr <= d_fin:
+        anno = curr.year
+        mese = curr.month
+        _, ultimo_giorno = calendar.monthrange(anno, mese)
+        fine_mese = date(anno, mese, ultimo_giorno)
+        fine_intervallo = min(fine_mese, d_fin)
+        mesi.append((curr, fine_intervallo))
+        curr = fine_intervallo + timedelta(days=1)
+    return mesi
+
+
+def ripartisci_consumi_per_mese(
+    periodo_inizio: date,
+    periodo_fine: date,
+    kwh_totali: int | float | str | Decimal,
+    consumi_mensili: Sequence[dict[str, Any]] | None = None,
+) -> list[tuple[date, date, Decimal, bool]]:
+    """
+    Ripartisce i consumi totali di una bolletta sui singoli mesi solari compresi nel periodo.
+
+    Ritorna una lista di tuple:
+        [(data_inizio_mese, data_fine_mese, kwh_mese, stimato)]
+
+    - Se `consumi_mensili` è presente e valorizzato (es. estratti dal parser letture e consumi),
+      utilizza direttamente tali misurazioni. Il flag `stimato` è True se il tipo è 'Stimato',
+      False se 'Effettivo' o 'Rilevato'.
+    - Altrimenti: esegue un riparto pro-rata sui giorni solari di ciascun mese intersecato.
+      L'ultimo mese riceve il residuo per garantire che la somma coincida esattamente con kwh_totali.
+      Imposta `stimato=True` per tutti i mesi e registra un `logger.warning`.
+    """
+    tot_kwh = _to_decimal(kwh_totali)
+
+    # 1. Se disponiamo dei consumi mensili espliciti estratti dal documento
+    if consumi_mensili:
+        risultato: list[tuple[date, date, Decimal, bool]] = []
+        for blocco in consumi_mensili:
+            d_ini = _to_date_pure(blocco.get("inizio")) or periodo_inizio
+            d_fin = _to_date_pure(blocco.get("fine")) or periodo_fine
+            k = _to_decimal(blocco.get("kwh", 0))
+            tipo_str = str(blocco.get("tipo", "Effettivo")).strip().lower()
+            stimato = tipo_str == "stimato"
+            risultato.append((d_ini, d_fin, k, stimato))
+        return risultato
+
+    # 2. Ripiego degradato: pro-rata sui giorni per mese solare
+    logger.warning(
+        "Ripartizione pro-rata consumi per il periodo %s -> %s (kWh totali=%s): "
+        "dati disaggregati mensili assenti, calcolo degradato su base giornaliera.",
+        periodo_inizio, periodo_fine, tot_kwh
+    )
+
+    intervalli = _spezza_periodo_in_mesi_solari(periodo_inizio, periodo_fine)
+    if not intervalli:
+        return [(periodo_inizio, periodo_fine, tot_kwh, True)]
+
+    tot_giorni = sum((f - i).days + 1 for i, f in intervalli)
+    if tot_giorni <= 0:
+        tot_giorni = 1
+
+    risultato_prorata: list[tuple[date, date, Decimal, bool]] = []
+    somma_cumulata = Decimal("0")
+
+    for idx, (d_ini, d_fin) in enumerate(intervalli):
+        giorni_int = Decimal((d_fin - d_ini).days + 1)
+        if idx == len(intervalli) - 1:
+            # Ultimo mese: resto per far quadrare la somma esattamente con kwh_totali
+            k_mese = tot_kwh - somma_cumulata
+        else:
+            k_mese = (tot_kwh * giorni_int / Decimal(tot_giorni)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            somma_cumulata += k_mese
+        risultato_prorata.append((d_ini, d_fin, k_mese, True))
+
+    return risultato_prorata
+

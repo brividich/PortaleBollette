@@ -140,7 +140,7 @@ class BaseProviderParser:
             return None
         s = stringa_data.strip().lower()
         s = re.sub(r"\b1[°º]\b", "1", s)
-        for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d"):
+        for fmt in ("%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y", "%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d"):
             try:
                 return datetime.strptime(s, fmt).date()
             except ValueError:

@@ -193,6 +193,26 @@ class BollettaElettrica(models.Model):
         "kWh fatturati", default=0,
         help_text="kWh di energia fatturati nel periodo della bolletta.",
     )
+    consumi_mensili = models.JSONField(
+        "Consumi mensili disaggregati",
+        null=True, blank=True,
+        help_text="Lista di consumi mensili [{'inizio': 'YYYY-MM-DD', 'fine': 'YYYY-MM-DD', 'kwh': 123, 'tipo': 'Effettivo'|'Stimato'}].",
+    )
+    quota_fissa_netta_periodo = models.DecimalField(
+        "Quota fissa netta periodo (€)", max_digits=8, decimal_places=2,
+        null=True, blank=True,
+        help_text="Somma netta di quota fissa vendita, rete e potenza del periodo (es. 39.90 €).",
+    )
+    totale_da_pagare = models.DecimalField(
+        "Totale da pagare fattura (€)", max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text="Totale documento comprensivo di partite addizionali come Canone TV.",
+    )
+    canone_rai = models.DecimalField(
+        "Canone abbonamento TV (€)", max_digits=8, decimal_places=2,
+        null=True, blank=True,
+        help_text="Quota Canone RAI addebitata in bolletta.",
+    )
     quota_fissa_mensile = models.DecimalField(
         "Quota fissa mensile (€/mese)", max_digits=8, decimal_places=2,
         default=Decimal("10.00"),

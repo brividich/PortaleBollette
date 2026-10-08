@@ -1,0 +1,21 @@
+Acea Energia SpA
+Numero Documento: 4124991234
+Periodo di fatturazione: dal 01/07/2026 al 31/08/2026
+
+LETTURE E CONSUMI
+Attiva 01/07/26 31/07/26 Rilevato
+F1 3.125 3.228 1,0 Effettivo 103 kWh
+F2 4.404 4.528 1,0 Effettivo 124 kWh
+F3 3.860 3.968 1,0 Effettivo 108 kWh
+Attiva 01/08/26 31/08/26 Rilevato
+F1 3.228 3.333 1,0 Effettivo 105 kWh
+F2 4.528 4.645 1,0 Effettivo 117 kWh
+F3 3.968 4.080 1,0 Effettivo 112 kWh
+F1 3.125 3.333 1,0 Fatturato 208 kWh
+
+SCONTRINO DELL'ENERGIA
+Quota fissa 2 mesi 14,020000 €/mese 28,04 €
+Quota potenza 3,000 kW per 2 mesi 1,976667 €/kW 11,86 €
+Canone di abbonamento alla televisione 18,00 €
+TOTALE BOLLETTA 198,66 €
+TOTALE DA PAGARE 216,66 €
